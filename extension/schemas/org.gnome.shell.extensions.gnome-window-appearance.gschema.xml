@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.gnome-window-appearance"
+          path="/org/gnome/shell/extensions/gnome-window-appearance/">
+    <key name="corner-radius" type="u">
+      <default>16</default>
+      <range min="0" max="64"/>
+      <summary>Window corner radius in logical pixels</summary>
+    </key>
+    <key name="shadow-blur" type="u">
+      <default>28</default>
+      <range min="0" max="64"/>
+      <summary>Shadow blur radius</summary>
+    </key>
+    <key name="shadow-spread" type="i">
+      <default>1</default>
+      <range min="-16" max="32"/>
+      <summary>Shadow spread radius</summary>
+    </key>
+    <key name="shadow-offset-y" type="i">
+      <default>8</default>
+      <range min="-32" max="32"/>
+      <summary>Vertical shadow offset</summary>
+    </key>
+    <key name="shadow-opacity" type="u">
+      <default>38</default>
+      <range min="0" max="100"/>
+      <summary>Focused shadow opacity in percent</summary>
+    </key>
+    <key name="skip-maximized" type="b">
+      <default>true</default>
+      <summary>Disable corners and shadows for maximized or fullscreen windows</summary>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,9 @@
+{
+  "name": "GNOME Window Appearance",
+  "description": "Prototype compositor-side rounded corners and shadows without whole-window offscreen effects",
+  "uuid": "gnome-window-appearance@chillet.moe",
+  "url": "https://github.com/Chillet/gnome-window-appearance",
+  "settings-schema": "org.gnome.shell.extensions.gnome-window-appearance",
+  "shell-version": ["50"],
+  "version": 1
+}

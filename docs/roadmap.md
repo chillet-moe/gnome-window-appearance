@@ -12,11 +12,11 @@
 
 ## 阶段 1：扩展原型
 
-- [ ] 搭建最小 GNOME Shell 扩展。
+- [x] 搭建最小 GNOME Shell 扩展。
 - [ ] 记录窗口 actor tree、正文纹理节点和 subsurface 行为。
-- [ ] 实现 `frameRect` 相对 `bufferRect` 的矩形 clip。
-- [ ] 在主内容节点验证无整窗 FBO 的圆角 alpha mask。
-- [ ] 实现独立统一阴影。
+- [x] 实现 `frameRect` 相对 `bufferRect` 的矩形 clip。
+- [x] 在主内容节点验证无整窗 FBO 的圆角 alpha mask。
+- [x] 实现独立统一阴影。
 - [ ] 覆盖移动、缩放、最大化、全屏、overview 和工作区切换。
 - [ ] 输出按 Shell 版本分类的兼容性与已知限制。
 
@@ -51,4 +51,4 @@
 
 ## 当前下一步
 
-先实现阶段 0 的可复现测试，再开始扩展代码。未经基线验证，不使用“看起来更锐”的过滤参数调整替代根因修复。
+扩展原型已在 250% 无头嵌套 GNOME Shell 中通过首轮测试。下一步补齐 overview、工作区、最大化/全屏和 JetBrains Runtime subsurface 场景，并增加启用效果前后的正文像素对照。
