@@ -3,15 +3,20 @@ set -euo pipefail
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 build_dir="$repo_dir/_build/mutter/build"
+library_dir=${TEST_MUTTER_LIBRARY_DIR:-$build_dir/src}
 runtime_dir="$repo_dir/_build/mutter/nested"
 uuid=gnome-window-appearance@chillet.moe
 wayland_display="gwayland-mutter-appearance-test-$$"
 
-for library in \
-    "$build_dir/src/libmutter-18.so.0.0.0" \
-    "$build_dir/clutter/clutter/libmutter-clutter-18.so.0.0.0" \
-    "$build_dir/cogl/cogl/libmutter-cogl-18.so.0.0.0" \
-    "$build_dir/mtk/mtk/libmutter-mtk-18.so.0.0.0"; do
+required_libraries=("$library_dir/libmutter-18.so.0.0.0")
+if [[ -z ${TEST_MUTTER_LIBRARY_DIR:-} ]]; then
+    required_libraries+=(
+        "$build_dir/clutter/clutter/libmutter-clutter-18.so.0.0.0"
+        "$build_dir/cogl/cogl/libmutter-cogl-18.so.0.0.0"
+        "$build_dir/mtk/mtk/libmutter-mtk-18.so.0.0.0"
+    )
+fi
+for library in "${required_libraries[@]}"; do
     if [[ ! -f "$library" ]]; then
         printf 'Patched Mutter is not built; run scripts/test-mutter-patches.sh first.\n' >&2
         exit 1
@@ -22,10 +27,11 @@ done
 mkdir -p "$runtime_dir/bin" "$runtime_dir/config" "$runtime_dir/data/gnome-shell/extensions"
 mkdir -p "$runtime_dir/cache" "$runtime_dir/state" "$repo_dir/tests/artifacts"
 
+read -r -a gtk_flags <<<"$(pkg-config --cflags --libs gtk+-3.0)"
 cc -O2 -Wall -Wextra \
     "$repo_dir/tests/fixtures/window-probe.c" \
     -o "$runtime_dir/bin/window-probe" \
-    $(pkg-config --cflags --libs gtk+-3.0)
+    "${gtk_flags[@]}"
 
 xdg_shell_xml=$(pkg-config --variable=pkgdatadir wayland-protocols)/stable/xdg-shell/xdg-shell.xml
 wayland-scanner client-header \
@@ -34,12 +40,13 @@ wayland-scanner client-header \
 wayland-scanner private-code \
     "$xdg_shell_xml" \
     "$runtime_dir/bin/xdg-shell-protocol.c"
+read -r -a wayland_flags <<<"$(pkg-config --cflags --libs wayland-client)"
 cc -O2 -Wall -Wextra -Wno-unused-parameter \
     -I"$runtime_dir/bin" \
     "$repo_dir/tests/fixtures/subsurface-probe.c" \
     "$runtime_dir/bin/xdg-shell-protocol.c" \
     -o "$runtime_dir/bin/subsurface-probe" \
-    $(pkg-config --cflags --libs wayland-client)
+    "${wayland_flags[@]}"
 
 extension_target="$runtime_dir/data/gnome-shell/extensions/$uuid"
 rm -rf "$extension_target"
@@ -54,7 +61,7 @@ export GTK_A11Y=none
 export TEST_WAYLAND_DISPLAY="$wayland_display"
 export TEST_PROBE="$runtime_dir/bin/subsurface-probe"
 export TEST_ARTIFACT_DIR="$repo_dir/tests/artifacts"
-export TEST_MUTTER_BUILD_DIR="$build_dir"
+export TEST_MUTTER_LIBRARY_DIR="$library_dir"
 export GWA_TEST_CAPTURE_ONLY=1
 export GWA_TEST_WM_CLASS=subsurface-probe
 export GWA_TEST_STATE_TRANSITIONS=1
@@ -63,6 +70,6 @@ export MUTTER_DEBUG_EXPERIMENTAL_FEATURES=window-appearance
 # MTK libraries. Only override the ABI-compatible core libmutter containing the
 # patch; loading build-tree copies of the component libraries as well would
 # register their boxed GI types a second time.
-export LD_LIBRARY_PATH="$build_dir/src"
+export LD_LIBRARY_PATH="$library_dir"
 
 dbus-run-session -- "$repo_dir/tests/integration/mutter-native-session.sh"

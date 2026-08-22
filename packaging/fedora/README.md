@@ -37,15 +37,22 @@
 
     ./packaging/fedora/build-rpms.sh
     ./packaging/fedora/verify-rpms.sh
+    ./packaging/fedora/test-rpms.sh
 
 构建会生成主包、当前已安装的子包、测试/调试子包、SRPM，以及包含上游 SRPM、
 仓库 commit 和补丁/RPM SHA-256 的 `_build/fedora/build-metadata.txt`。
+`test-rpms.sh` 会直接从最终主 RPM 解包 release/LTO 优化后的 core libmutter，
+并用它运行与开发构建相同的 250% 嵌套渲染回归，不安装系统包。
 
 安装脚本只升级当前已经安装的 Mutter 子包。它会先把这些包的官方 RPM 下载到
 `_build/fedora/rollback/` 并保存精确版本清单，再从禁用仓库的本地事务安装，
 最后在不覆盖其他 experimental feature 的前提下启用 `window-appearance`：
 
     ./packaging/fedora/install-rpms.sh
+
+也可以在安装前单独准备并审计离线回滚集合：
+
+    ./packaging/fedora/cache-rollback.sh
 
 安装后需登出并重新登录。恢复官方包及原有 feature 列表：
 

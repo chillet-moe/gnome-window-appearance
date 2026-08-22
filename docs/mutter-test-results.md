@@ -43,3 +43,11 @@
 当前结果覆盖矩形裁切、原生圆角 alpha、compositor 阴影、最大化/全屏状态
 切换、Overview clone 和合成的 `wl_subsurface` 回归客户端。workspace 切换、
 真实 JetBrains Runtime subsurface 和 200%/300% 渲染矩阵仍待扩大覆盖。
+
+Fedora spec 以 `Patch9001` 至 `Patch9003` 通过 `%autosetup -S git` 严格应用，
+使用 Fedora release flags、LTO 与完整安装目标成功生成
+`mutter-50.4-1.gwa1.fc44` 的主包、已安装子包、测试/调试包和 SRPM。所有 RPM
+摘要通过，DNF `--assumeno` 确认为四个已安装子包的纯升级事务。最终主 RPM 中
+解包出的优化版 libmutter 再次通过上述嵌套渲染回归。四个原始
+`50.4-1.fc44` 官方 RPM 已按精确 NEVRA 缓存并通过 Fedora 签名/摘要验证，供
+离线回滚使用；真实系统包替换仍需单独明确授权。

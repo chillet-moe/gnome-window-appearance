@@ -57,7 +57,7 @@ if ! rg -q 'GNOME Shell started' "$shell_log"; then
     exit 1
 fi
 
-if ! rg -q "$TEST_MUTTER_BUILD_DIR/src/libmutter-18" "/proc/$shell_pid/maps"; then
+if ! rg -Fq "$TEST_MUTTER_LIBRARY_DIR/libmutter-18" "/proc/$shell_pid/maps"; then
     printf 'Nested GNOME Shell did not load the patched libmutter.\n' >&2
     exit 1
 fi
