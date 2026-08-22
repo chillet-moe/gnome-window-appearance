@@ -23,4 +23,5 @@
 确认 Shell 实际映射了构建目录中的 libmutter，在 250% 缩放下启动一个
 `frameRect != bufferRect` 的 Wayland 客户端。该客户端用独立红色
 `wl_subsurface` 覆盖左上角；测试同时验证客户端阴影被清除、四角圆角 alpha、
-subsurface 在圆角内部仍可见，以及窗口正文没有被错误地整体裁掉。
+subsurface 在圆角内部仍可见，以及窗口正文没有被错误地整体裁掉。随后测试
+最大化、恢复、全屏、再次恢复，验证方角禁用路径与圆角恢复路径。

@@ -5,8 +5,13 @@ uuid=gnome-window-appearance@chillet.moe
 test_wm_class=${GWA_TEST_WM_CLASS:-window-probe}
 shell_log="$TEST_ARTIFACT_DIR/mutter-native-shell.log"
 screenshot="$TEST_ARTIFACT_DIR/fractional-2.5.png"
+maximized_screenshot="$TEST_ARTIFACT_DIR/mutter-native-maximized.png"
+restored_screenshot="$TEST_ARTIFACT_DIR/mutter-native-restored.png"
+fullscreen_screenshot="$TEST_ARTIFACT_DIR/mutter-native-fullscreen.png"
+restored_final_screenshot="$TEST_ARTIFACT_DIR/mutter-native-restored-final.png"
 display_config="$TEST_ARTIFACT_DIR/mutter-native-display-config.txt"
-rm -f "$screenshot"
+rm -f "$screenshot" "$maximized_screenshot" "$restored_screenshot" \
+    "$fullscreen_screenshot" "$restored_final_screenshot"
 
 gsettings set org.gnome.shell enabled-extensions "['$uuid']"
 gsettings set org.gnome.shell disable-user-extensions false
@@ -72,6 +77,7 @@ probe_pid=$!
 
 for _ in $(seq 1 120); do
     if [[ -s "$screenshot" ]] &&
+       [[ -s "$restored_final_screenshot" ]] &&
        rg -q "\[gnome-window-appearance\] capture-only $test_wm_class " "$shell_log"; then
         break
     fi
@@ -83,6 +89,48 @@ if [[ ! -s "$screenshot" ]]; then
     tail -n 120 "$shell_log" >&2
     exit 1
 fi
+if [[ ! -s "$maximized_screenshot" || ! -s "$restored_screenshot" ||
+      ! -s "$fullscreen_screenshot" || ! -s "$restored_final_screenshot" ]]; then
+    printf 'Patched nested Shell did not complete state-transition captures.\n' >&2
+    tail -n 120 "$shell_log" >&2
+    exit 1
+fi
+
+for expected_state in \
+    'state=maximized native-clip=false' \
+    'state=restored native-clip=true' \
+    'state=fullscreen native-clip=false' \
+    'state=restored-final native-clip=true'; do
+    if ! rg -q "\[gnome-window-appearance\] $expected_state" "$shell_log"; then
+        printf 'Native clip state transition was not observed: %s\n' \
+            "$expected_state" >&2
+        exit 1
+    fi
+done
+
+for state_capture in \
+    "maximized:$maximized_screenshot" \
+    "fullscreen:$fullscreen_screenshot"; do
+    state=${state_capture%%:*}
+    state_screenshot=${state_capture#*:}
+    state_line=$(rg "\[gnome-window-appearance\] state=$state " \
+        "$shell_log" | tail -n 1)
+    read -r state_x state_y < <(
+        sed -E \
+            's/.*frame=[0-9]+x[0-9]+\+([0-9]+)\+([0-9]+).*/\1 \2/' \
+            <<<"$state_line"
+    )
+    state_sample_x=$(( (state_x + 2) * 5 / 2 ))
+    state_sample_y=$(( (state_y + 2) * 5 / 2 ))
+    square_corner_visible=$(magick "$state_screenshot" -format "%[fx:
+        p{$state_sample_x,$state_sample_y}.r > 0.9 &&
+        p{$state_sample_x,$state_sample_y}.g < 0.1 &&
+        p{$state_sample_x,$state_sample_y}.b < 0.1 ? 1 : 0]" info:)
+    if [[ "$square_corner_visible" != 1 ]]; then
+        printf 'Rounded alpha remained active in %s state.\n' "$state" >&2
+        exit 1
+    fi
+done
 
 geometry_line=$(rg "\[gnome-window-appearance\] capture-only $test_wm_class " \
     "$shell_log" | tail -n 1)
@@ -190,6 +238,24 @@ rounded_corners_ok=$(magick "$screenshot" -format "%[fx:
     abs(p{$bottom_right_x,$bottom_right_y}.b - 96/255) < 0.05 ? 1 : 0]" info:)
 if [[ "$rounded_corners_ok" != 1 ]]; then
     printf 'Native rounded alpha did not expose all four frame corners.\n' >&2
+    exit 1
+fi
+
+restored_corners_ok=$(magick "$restored_final_screenshot" -format "%[fx:
+    abs(p{$top_left_x,$top_left_y}.r - 32/255) < 0.05 &&
+    abs(p{$top_left_x,$top_left_y}.g - 64/255) < 0.05 &&
+    abs(p{$top_left_x,$top_left_y}.b - 96/255) < 0.05 &&
+    abs(p{$top_right_x,$top_right_y}.r - 32/255) < 0.05 &&
+    abs(p{$top_right_x,$top_right_y}.g - 64/255) < 0.05 &&
+    abs(p{$top_right_x,$top_right_y}.b - 96/255) < 0.05 &&
+    abs(p{$bottom_left_x,$bottom_left_y}.r - 32/255) < 0.05 &&
+    abs(p{$bottom_left_x,$bottom_left_y}.g - 64/255) < 0.05 &&
+    abs(p{$bottom_left_x,$bottom_left_y}.b - 96/255) < 0.05 &&
+    abs(p{$bottom_right_x,$bottom_right_y}.r - 32/255) < 0.05 &&
+    abs(p{$bottom_right_x,$bottom_right_y}.g - 64/255) < 0.05 &&
+    abs(p{$bottom_right_x,$bottom_right_y}.b - 96/255) < 0.05 ? 1 : 0]" info:)
+if [[ "$restored_corners_ok" != 1 ]]; then
+    printf 'Native rounded alpha was not restored after state transitions.\n' >&2
     exit 1
 fi
 

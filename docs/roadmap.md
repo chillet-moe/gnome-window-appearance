@@ -17,7 +17,7 @@
 - [x] 实现 `frameRect` 相对 `bufferRect` 的矩形 clip。
 - [x] 在主内容节点验证无整窗 FBO 的圆角 alpha mask。
 - [x] 实现独立统一阴影。
-- [ ] 覆盖移动、缩放、最大化、全屏、overview 和工作区切换。
+- [ ] 覆盖移动、缩放、overview 和工作区切换（最大化、全屏已覆盖）。
 - [ ] 输出按 Shell 版本分类的兼容性与已知限制。
 
 退出条件：扩展方案在目标 GNOME 版本上可日常使用，或存在经过测试证明无法绕过的 API/渲染限制。
@@ -53,5 +53,5 @@
 
 Mutter 50.4 已在 Wayland surface-container 层实现 window geometry 矩形裁切，
 并在每个 `MetaShapedTexture` pipeline 中实现不创建整窗 FBO 的圆角 alpha；
-250% 无头嵌套测试已覆盖真实 `wl_subsurface`。下一步为最大化/全屏状态切换
-增加自动化覆盖，并确定 compositor 阴影所有权。
+250% 无头嵌套测试已覆盖真实 `wl_subsurface` 及普通、最大化、全屏、恢复状态
+切换。下一步确定 compositor 阴影所有权并实现统一阴影。

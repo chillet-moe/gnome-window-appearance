@@ -57,6 +57,7 @@ export TEST_ARTIFACT_DIR="$repo_dir/tests/artifacts"
 export TEST_MUTTER_BUILD_DIR="$build_dir"
 export GWA_TEST_CAPTURE_ONLY=1
 export GWA_TEST_WM_CLASS=subsurface-probe
+export GWA_TEST_STATE_TRANSITIONS=1
 export MUTTER_DEBUG_EXPERIMENTAL_FEATURES=window-appearance
 # GNOME Shell's installed typelibs are paired with the system Cogl, Clutter and
 # MTK libraries. Only override the ABI-compatible core libmutter containing the

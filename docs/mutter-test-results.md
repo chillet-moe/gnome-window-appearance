@@ -24,6 +24,8 @@
   可见，而四个角落均恢复为背景，证明圆角应用于完整 surface tree；
 - 窗口中心仍为客户端内容，防止 shader 将整窗错误变透明却误报通过；
 - 250% 缩放下圆角使用最终 fragment coverage，不经过整窗 FBO；
+- 同一 probe 依次执行普通、最大化、恢复、全屏、再次恢复：最大化与全屏时
+  native clip 均关闭且红色方角可见，两次恢复后 native clip 与四个圆角均恢复；
 - Shell 日志没有 JavaScript error、断言失败或崩溃。
 
 测试命令：
@@ -31,6 +33,6 @@
     ./scripts/test-mutter-patches.sh
     ./tests/run-mutter-nested.sh
 
-当前结果覆盖矩形裁切、原生圆角 alpha 和合成的 `wl_subsurface` 回归客户端。
-compositor 阴影、状态切换、overview、workspace、clone 和真实 JetBrains
-Runtime subsurface 仍待后续补丁与测试覆盖。
+当前结果覆盖矩形裁切、原生圆角 alpha、最大化/全屏状态切换和合成的
+`wl_subsurface` 回归客户端。compositor 阴影、overview、workspace、clone 和
+真实 JetBrains Runtime subsurface 仍待后续补丁与测试覆盖。
