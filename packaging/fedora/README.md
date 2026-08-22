@@ -27,3 +27,40 @@
 若缺少构建依赖，可按匹配的 SRPM 安装：
 
     sudo dnf5 builddep ./mutter-50.4-1.fc44.src.rpm
+
+## 可安装 RPM
+
+以下流程会重新解包精确匹配的 Fedora SRPM，把编号补丁声明为 spec 的
+`Patch9001...` 并交给 `%autosetup -S git` 严格应用。Release 使用
+`1.gwa1.fc44` 形式，高于同一 Fedora release，但新的 Fedora release 仍能被
+更新检测发现。所有工作目录和产物都位于 `_build/fedora/`。
+
+    ./packaging/fedora/build-rpms.sh
+    ./packaging/fedora/verify-rpms.sh
+
+构建会生成主包、当前已安装的子包、测试/调试子包、SRPM，以及包含上游 SRPM、
+仓库 commit 和补丁/RPM SHA-256 的 `_build/fedora/build-metadata.txt`。
+
+安装脚本只升级当前已经安装的 Mutter 子包。它会先把这些包的官方 RPM 下载到
+`_build/fedora/rollback/` 并保存精确版本清单，再从禁用仓库的本地事务安装，
+最后在不覆盖其他 experimental feature 的前提下启用 `window-appearance`：
+
+    ./packaging/fedora/install-rpms.sh
+
+安装后需登出并重新登录。恢复官方包及原有 feature 列表：
+
+    ./packaging/fedora/rollback-rpms.sh
+
+回滚只使用安装前缓存的精确 RPM，不依赖当时的网络或仓库状态。也可在官方包
+仍可用时执行 `sudo dnf5 distro-sync 'mutter*'`，但缓存回滚更可预测。
+
+## 更新门禁
+
+`rebuild-update.sh` 查询当前架构最新的 Fedora Mutter。没有更新时直接退出；
+发现新 SRPM 时，依次执行严格补丁重放、核心库编译、250% 嵌套 Shell 回归、
+Fedora RPM 构建与摘要验证。任何一步失败都会停止，且不会自动安装：
+
+    ./packaging/fedora/rebuild-update.sh
+
+若临时使用 DNF5 versionlock，更新检查/重建成功后应先移除锁，再安装新本地包；
+不要用 versionlock 代替安全更新跟进。
