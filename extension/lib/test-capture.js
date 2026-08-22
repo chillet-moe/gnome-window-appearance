@@ -6,8 +6,9 @@ let captureScheduled = false;
 
 export function scheduleTestCapture(window) {
     const artifactDir = GLib.getenv('TEST_ARTIFACT_DIR');
+    const testWmClass = GLib.getenv('GWA_TEST_WM_CLASS') ?? 'window-probe';
     if (!artifactDir || captureScheduled ||
-        window.get_wm_class() !== 'window-probe') {
+        window.get_wm_class() !== testWmClass) {
         return;
     }
 

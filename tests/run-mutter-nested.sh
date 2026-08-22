@@ -27,6 +27,20 @@ cc -O2 -Wall -Wextra \
     -o "$runtime_dir/bin/window-probe" \
     $(pkg-config --cflags --libs gtk+-3.0)
 
+xdg_shell_xml=$(pkg-config --variable=pkgdatadir wayland-protocols)/stable/xdg-shell/xdg-shell.xml
+wayland-scanner client-header \
+    "$xdg_shell_xml" \
+    "$runtime_dir/bin/xdg-shell-client-protocol.h"
+wayland-scanner private-code \
+    "$xdg_shell_xml" \
+    "$runtime_dir/bin/xdg-shell-protocol.c"
+cc -O2 -Wall -Wextra -Wno-unused-parameter \
+    -I"$runtime_dir/bin" \
+    "$repo_dir/tests/fixtures/subsurface-probe.c" \
+    "$runtime_dir/bin/xdg-shell-protocol.c" \
+    -o "$runtime_dir/bin/subsurface-probe" \
+    $(pkg-config --cflags --libs wayland-client)
+
 extension_target="$runtime_dir/data/gnome-shell/extensions/$uuid"
 rm -rf "$extension_target"
 cp -R "$repo_dir/_build/extension/$uuid" "$extension_target"
@@ -38,10 +52,11 @@ export XDG_CACHE_HOME="$runtime_dir/cache"
 export XDG_STATE_HOME="$runtime_dir/state"
 export GTK_A11Y=none
 export TEST_WAYLAND_DISPLAY="$wayland_display"
-export TEST_PROBE="$runtime_dir/bin/window-probe"
+export TEST_PROBE="$runtime_dir/bin/subsurface-probe"
 export TEST_ARTIFACT_DIR="$repo_dir/tests/artifacts"
 export TEST_MUTTER_BUILD_DIR="$build_dir"
 export GWA_TEST_CAPTURE_ONLY=1
+export GWA_TEST_WM_CLASS=subsurface-probe
 export MUTTER_DEBUG_EXPERIMENTAL_FEATURES=window-appearance
 # GNOME Shell's installed typelibs are paired with the system Cogl, Clutter and
 # MTK libraries. Only override the ABI-compatible core libmutter containing the

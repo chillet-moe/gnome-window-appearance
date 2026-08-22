@@ -20,5 +20,7 @@
     ./tests/run-mutter-nested.sh
 
 嵌套测试通过环境变量启用 experimental feature，不更改当前桌面设置；它会
-确认 Shell 实际映射了构建目录中的 libmutter，在 250% 缩放下启动带客户端
-阴影的 GTK Wayland 窗口，并验证 frame 外、buffer 内的像素已经显示为背景。
+确认 Shell 实际映射了构建目录中的 libmutter，在 250% 缩放下启动一个
+`frameRect != bufferRect` 的 Wayland 客户端。该客户端用独立红色
+`wl_subsurface` 覆盖左上角；测试同时验证客户端阴影被清除、四角圆角 alpha、
+subsurface 在圆角内部仍可见，以及窗口正文没有被错误地整体裁掉。

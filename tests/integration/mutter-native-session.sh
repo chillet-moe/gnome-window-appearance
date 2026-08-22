@@ -2,6 +2,7 @@
 set -euo pipefail
 
 uuid=gnome-window-appearance@chillet.moe
+test_wm_class=${GWA_TEST_WM_CLASS:-window-probe}
 shell_log="$TEST_ARTIFACT_DIR/mutter-native-shell.log"
 screenshot="$TEST_ARTIFACT_DIR/fractional-2.5.png"
 display_config="$TEST_ARTIFACT_DIR/mutter-native-display-config.txt"
@@ -71,7 +72,7 @@ probe_pid=$!
 
 for _ in $(seq 1 120); do
     if [[ -s "$screenshot" ]] &&
-       rg -q '\[gnome-window-appearance\] capture-only window-probe ' "$shell_log"; then
+       rg -q "\[gnome-window-appearance\] capture-only $test_wm_class " "$shell_log"; then
         break
     fi
     sleep 0.1
@@ -83,7 +84,7 @@ if [[ ! -s "$screenshot" ]]; then
     exit 1
 fi
 
-geometry_line=$(rg '\[gnome-window-appearance\] capture-only window-probe ' \
+geometry_line=$(rg "\[gnome-window-appearance\] capture-only $test_wm_class " \
     "$shell_log" | tail -n 1)
 if [[ "$geometry_line" != *'native-clip=true'* ]]; then
     printf 'Wayland surface container did not receive the native clip: %s\n' \
@@ -144,6 +145,73 @@ background_ok=$(magick "$screenshot" -format "%[fx:
 if [[ "$background_ok" != 1 ]]; then
     printf 'Client shadow remained outside the declared frame at %s,%s.\n' \
         "$sample_x" "$sample_y" >&2
+    exit 1
+fi
+
+# Sample two logical pixels inside each frame corner. A 16px logical native
+# radius at 250% scale must expose the background there, while the center must
+# remain client content. The latter prevents an all-transparent shader failure
+# from masquerading as a successful clip.
+read -r top_left_x top_left_y top_right_x top_right_y \
+    bottom_left_x bottom_left_y bottom_right_x bottom_right_y \
+    center_x center_y < <(
+    awk \
+        -v fx="$frame_x" -v fy="$frame_y" \
+        -v fw="$frame_width" -v fh="$frame_height" \
+        'BEGIN {
+            scale = 2.5
+            inset = 2
+            printf "%d %d %d %d %d %d %d %d %d %d\n", \
+                int((fx + inset) * scale + 0.5), \
+                int((fy + inset) * scale + 0.5), \
+                int((fx + fw - inset) * scale + 0.5), \
+                int((fy + inset) * scale + 0.5), \
+                int((fx + inset) * scale + 0.5), \
+                int((fy + fh - inset) * scale + 0.5), \
+                int((fx + fw - inset) * scale + 0.5), \
+                int((fy + fh - inset) * scale + 0.5), \
+                int((fx + fw / 2) * scale + 0.5), \
+                int((fy + fh / 2) * scale + 0.5)
+        }'
+)
+
+rounded_corners_ok=$(magick "$screenshot" -format "%[fx:
+    abs(p{$top_left_x,$top_left_y}.r - 32/255) < 0.05 &&
+    abs(p{$top_left_x,$top_left_y}.g - 64/255) < 0.05 &&
+    abs(p{$top_left_x,$top_left_y}.b - 96/255) < 0.05 &&
+    abs(p{$top_right_x,$top_right_y}.r - 32/255) < 0.05 &&
+    abs(p{$top_right_x,$top_right_y}.g - 64/255) < 0.05 &&
+    abs(p{$top_right_x,$top_right_y}.b - 96/255) < 0.05 &&
+    abs(p{$bottom_left_x,$bottom_left_y}.r - 32/255) < 0.05 &&
+    abs(p{$bottom_left_x,$bottom_left_y}.g - 64/255) < 0.05 &&
+    abs(p{$bottom_left_x,$bottom_left_y}.b - 96/255) < 0.05 &&
+    abs(p{$bottom_right_x,$bottom_right_y}.r - 32/255) < 0.05 &&
+    abs(p{$bottom_right_x,$bottom_right_y}.g - 64/255) < 0.05 &&
+    abs(p{$bottom_right_x,$bottom_right_y}.b - 96/255) < 0.05 ? 1 : 0]" info:)
+if [[ "$rounded_corners_ok" != 1 ]]; then
+    printf 'Native rounded alpha did not expose all four frame corners.\n' >&2
+    exit 1
+fi
+
+if [[ "$test_wm_class" == subsurface-probe ]]; then
+    subsurface_x=$(( (frame_x + 16) * 5 / 2 ))
+    subsurface_y=$(( (frame_y + 2) * 5 / 2 ))
+    subsurface_visible=$(magick "$screenshot" -format "%[fx:
+        p{$subsurface_x,$subsurface_y}.r > 0.9 &&
+        p{$subsurface_x,$subsurface_y}.g < 0.1 &&
+        p{$subsurface_x,$subsurface_y}.b < 0.1 ? 1 : 0]" info:)
+    if [[ "$subsurface_visible" != 1 ]]; then
+        printf 'Subsurface probe was not visible inside the rounded boundary.\n' >&2
+        exit 1
+    fi
+fi
+
+content_visible=$(magick "$screenshot" -format "%[fx:
+    abs(p{$center_x,$center_y}.r - 32/255) >= 0.05 ||
+    abs(p{$center_x,$center_y}.g - 64/255) >= 0.05 ||
+    abs(p{$center_x,$center_y}.b - 96/255) >= 0.05 ? 1 : 0]" info:)
+if [[ "$content_visible" != 1 ]]; then
+    printf 'Window content disappeared while applying native rounded alpha.\n' >&2
     exit 1
 fi
 

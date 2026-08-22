@@ -91,6 +91,10 @@ export class WindowAppearanceManager {
         }
 
         if (GLib.getenv('GWA_TEST_CAPTURE_ONLY') === '1') {
+            const testWmClass = GLib.getenv('GWA_TEST_WM_CLASS') ?? 'window-probe';
+            if (window.get_wm_class() !== testWmClass)
+                return;
+
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
                 const findContentActor = currentActor => {
                     if (currentActor.content === actor.get_texture())

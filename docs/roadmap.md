@@ -25,9 +25,9 @@
 ## 阶段 2：Mutter 设计与最小补丁
 
 - [x] 选定窗口 surface tree 的原生裁切入口。
-- [ ] 选定不引入额外整窗采样的圆角实现位置。
+- [x] 选定不引入额外整窗采样的圆角实现位置。
 - [ ] 明确 compositor 阴影与现有 shape/阴影代码的所有权。
-- [ ] 把实现拆成可独立审查的最小补丁。
+- [x] 把矩形裁切与圆角 alpha 拆成可独立审查的最小补丁。
 - [x] 在 nested GNOME Shell 中完成首个矩形裁切补丁的 smoke test 和渲染对比。
 
 退出条件：原生路径满足清晰度与几何成功标准，补丁没有依赖扩展中的 actor monkey patch。
@@ -51,7 +51,7 @@
 
 ## 当前下一步
 
-Mutter 50.4 的首个原生补丁已在 Wayland surface-container 层实现可选的
-window geometry 矩形裁切，并通过 250% 无头嵌套测试。下一步在
-`MetaShapedTexture` pipeline 中实现不创建整窗 FBO 的圆角 alpha，同时为
-最大化/全屏状态切换增加自动化覆盖；随后再确定 compositor 阴影所有权。
+Mutter 50.4 已在 Wayland surface-container 层实现 window geometry 矩形裁切，
+并在每个 `MetaShapedTexture` pipeline 中实现不创建整窗 FBO 的圆角 alpha；
+250% 无头嵌套测试已覆盖真实 `wl_subsurface`。下一步为最大化/全屏状态切换
+增加自动化覆盖，并确定 compositor 阴影所有权。

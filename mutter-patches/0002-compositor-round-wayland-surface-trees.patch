@@ -1,0 +1,342 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: GNOME Window Appearance <gnome-window-appearance@chillet.moe>
+Date: Sat, 22 Aug 2026 00:00:00 +0800
+Subject: [PATCH] compositor: Round Wayland surface trees natively
+
+Apply rounded alpha to every MetaShapedTexture in an eligible Wayland
+surface tree. Pass pre-sampling destination coordinates through the existing
+pipeline and only multiply the final premultiplied color by the rounded-rect
+coverage, so the implementation does not create or resample a whole-window
+offscreen framebuffer.
+
+Use fragment derivatives for antialiasing under fractional stage scaling and
+actor transforms. Disable opaque-region bypass and direct scanout eligibility
+while rounding is active, ensuring fully opaque client surfaces cannot skip
+the alpha operation. Refresh per-surface bounds before paint so subsurface
+position changes and Shell clones share the correct window-local boundary.
+
+Target: Mutter 50.4
+Depends-on: 0001-compositor-clip-wayland-surface-trees.patch
+Tested-by: scripts/test-mutter-patches.sh
+Tested-by: tests/run-mutter-nested.sh
+---
+ src/compositor/meta-shaped-texture-private.h |   3 +
+ src/compositor/meta-shaped-texture.c         | 124 ++++++++++++++++++-
+ src/compositor/meta-window-actor-wayland.c   |  36 ++++++
+ 3 files changed, 162 insertions(+), 1 deletion(-)
+
+diff --git a/src/compositor/meta-shaped-texture-private.h b/src/compositor/meta-shaped-texture-private.h
+index 4e07750..1a112c6 100644
+--- a/src/compositor/meta-shaped-texture-private.h
++++ b/src/compositor/meta-shaped-texture-private.h
+@@ -40,6 +40,9 @@ void meta_shaped_texture_set_is_y_inverted (MetaShapedTexture *stex,
+                                             gboolean           is_y_inverted);
+ void meta_shaped_texture_set_snippet (MetaShapedTexture *stex,
+                                       CoglSnippet       *snippet);
++void meta_shaped_texture_set_rounded_clip (MetaShapedTexture      *stex,
++                                           const graphene_rect_t *bounds,
++                                           float                  radius);
+ void meta_shaped_texture_set_fallback_size (MetaShapedTexture *stex,
+                                             int                fallback_width,
+                                             int                fallback_height);
+diff --git a/src/compositor/meta-shaped-texture.c b/src/compositor/meta-shaped-texture.c
+index a80818e..a89eeb9 100644
+--- a/src/compositor/meta-shaped-texture.c
++++ b/src/compositor/meta-shaped-texture.c
+@@ -96,6 +96,8 @@ struct _MetaShapedTexture
+   MetaMultiTexture *texture;
+   CoglTexture *mask_texture;
+   CoglSnippet *snippet;
++  graphene_rect_t rounded_clip_bounds;
++  float rounded_clip_radius;
+   ClutterColorState *color_state;
+ 
+   CoglPipeline *base_pipeline;
+@@ -132,6 +134,36 @@ struct _MetaShapedTexture
+   MetaMultiTextureCoefficients coeffs;
+ };
+ 
++#define ROUNDED_CLIP_VERTEX_DECLARATIONS \
++  "varying vec2 meta_rounded_clip_position;\n" \
++  "uniform vec2 meta_rounded_clip_texture_size;\n"
++#define ROUNDED_CLIP_VERTEX_CODE \
++  "meta_rounded_clip_position = " \
++  "cogl_tex_coord0_in.xy * meta_rounded_clip_texture_size;\n"
++
++#define ROUNDED_CLIP_FRAGMENT_DECLARATIONS                                \
++  "varying vec2 meta_rounded_clip_position;                            \n" \
++  "uniform vec4 meta_rounded_clip_bounds;                              \n" \
++  "uniform float meta_rounded_clip_radius;                             \n" \
++  "float meta_rounded_rect_coverage (vec2 position)                    \n" \
++  "{                                                                   \n" \
++  "  vec2 half_size =                                                  \n" \
++  "    (meta_rounded_clip_bounds.zw - meta_rounded_clip_bounds.xy) * 0.5;\n" \
++  "  vec2 center =                                                     \n" \
++  "    (meta_rounded_clip_bounds.zw + meta_rounded_clip_bounds.xy) * 0.5;\n" \
++  "  float radius = min (meta_rounded_clip_radius,                     \n" \
++  "                      min (half_size.x, half_size.y));              \n" \
++  "  vec2 q = abs (position - center) - half_size + vec2 (radius);    \n" \
++  "  float distance = length (max (q, vec2 (0.0))) +                  \n" \
++  "                   min (max (q.x, q.y), 0.0) - radius;             \n" \
++  "  float antialias_width = max (fwidth (distance), 0.0001);         \n" \
++  "  return 1.0 - smoothstep (-antialias_width,                       \n" \
++  "                           antialias_width, distance);              \n" \
++  "}                                                                   \n"
++#define ROUNDED_CLIP_FRAGMENT_CODE                                        \
++  "cogl_color_out *= meta_rounded_rect_coverage "                       \
++  "(meta_rounded_clip_position);\n"
++
+ G_DEFINE_TYPE_WITH_CODE (MetaShapedTexture, meta_shaped_texture, G_TYPE_OBJECT,
+                          G_IMPLEMENT_INTERFACE (CLUTTER_TYPE_CONTENT,
+                                                 clutter_content_iface_init));
+@@ -487,6 +519,60 @@ attach_and_save_color_snippet (MetaShapedTexture *stex,
+                                        pipeline);
+ }
+ 
++static gboolean
++has_rounded_clip (MetaShapedTexture *stex)
++{
++  return stex->rounded_clip_radius > 0.0f;
++}
++
++static void
++add_rounded_clip (MetaShapedTexture *stex,
++                  CoglPipeline      *pipeline)
++{
++  static CoglSnippet *vertex_snippet;
++  static CoglSnippet *fragment_snippet;
++  float bounds[4];
++  float texture_size[2];
++
++  if (!has_rounded_clip (stex))
++    return;
++
++  if (!vertex_snippet)
++    vertex_snippet = cogl_snippet_new (COGL_SNIPPET_HOOK_VERTEX,
++                                       ROUNDED_CLIP_VERTEX_DECLARATIONS,
++                                       ROUNDED_CLIP_VERTEX_CODE);
++  cogl_pipeline_add_snippet (pipeline, vertex_snippet);
++
++  if (!fragment_snippet)
++    fragment_snippet = cogl_snippet_new (COGL_SNIPPET_HOOK_FRAGMENT,
++                                         ROUNDED_CLIP_FRAGMENT_DECLARATIONS,
++                                         ROUNDED_CLIP_FRAGMENT_CODE);
++  cogl_pipeline_add_snippet (pipeline, fragment_snippet);
++
++  bounds[0] = stex->rounded_clip_bounds.origin.x;
++  bounds[1] = stex->rounded_clip_bounds.origin.y;
++  bounds[2] = bounds[0] + stex->rounded_clip_bounds.size.width;
++  bounds[3] = bounds[1] + stex->rounded_clip_bounds.size.height;
++
++  cogl_pipeline_set_uniform_float (
++    pipeline,
++    cogl_pipeline_get_uniform_location (pipeline,
++                                        "meta_rounded_clip_bounds"),
++    4, 1, bounds);
++  cogl_pipeline_set_uniform_1f (
++    pipeline,
++    cogl_pipeline_get_uniform_location (pipeline,
++                                        "meta_rounded_clip_radius"),
++    stex->rounded_clip_radius);
++  texture_size[0] = stex->dst_width;
++  texture_size[1] = stex->dst_height;
++  cogl_pipeline_set_uniform_float (
++    pipeline,
++    cogl_pipeline_get_uniform_location (pipeline,
++                                        "meta_rounded_clip_texture_size"),
++    2, 1, texture_size);
++}
++
+ static CoglPipeline *
+ get_unmasked_pipeline (MetaShapedTexture   *stex,
+                        ClutterPaintContext *paint_context,
+@@ -517,6 +603,7 @@ get_unmasked_pipeline (MetaShapedTexture   *stex,
+       pipeline = cogl_pipeline_copy (get_combined_pipeline (stex, paint_context));
+       if (stex->snippet)
+         cogl_pipeline_add_layer_snippet (pipeline, 0, stex->snippet);
++      add_rounded_clip (stex, pipeline);
+ 
+       attach_and_save_color_snippet (stex,
+                                      color_state, target_color_state,
+@@ -537,6 +624,7 @@ get_unmasked_pipeline (MetaShapedTexture   *stex,
+         return pipeline;
+ 
+       pipeline = cogl_pipeline_copy (get_base_pipeline (stex, paint_context));
++      add_rounded_clip (stex, pipeline);
+ 
+       attach_and_save_color_snippet (stex,
+                                      color_state, target_color_state,
+@@ -580,6 +668,7 @@ get_masked_pipeline (MetaShapedTexture   *stex,
+                                        NULL);
+       if (stex->snippet)
+         cogl_pipeline_add_layer_snippet (pipeline, 0, stex->snippet);
++      add_rounded_clip (stex, pipeline);
+ 
+       attach_and_save_color_snippet (stex,
+                                      color_state, target_color_state,
+@@ -603,6 +692,7 @@ get_masked_pipeline (MetaShapedTexture   *stex,
+       cogl_pipeline_set_layer_combine (pipeline, 1,
+                                        "RGBA = MODULATE (PREVIOUS, TEXTURE[A])",
+                                        NULL);
++      add_rounded_clip (stex, pipeline);
+ 
+       attach_and_save_color_snippet (stex,
+                                      color_state, target_color_state,
+@@ -644,6 +734,7 @@ get_unblended_pipeline (MetaShapedTexture   *stex,
+                                        NULL);
+       if (stex->snippet)
+         cogl_pipeline_add_layer_snippet (pipeline, 0, stex->snippet);
++      add_rounded_clip (stex, pipeline);
+ 
+       attach_and_save_color_snippet (stex,
+                                      color_state, target_color_state,
+@@ -667,6 +758,7 @@ get_unblended_pipeline (MetaShapedTexture   *stex,
+       cogl_pipeline_set_layer_combine (pipeline, 0,
+                                        "RGBA = REPLACE (TEXTURE)",
+                                        NULL);
++      add_rounded_clip (stex, pipeline);
+ 
+       attach_and_save_color_snippet (stex,
+                                      color_state, target_color_state,
+@@ -911,7 +1003,9 @@ do_paint_content (MetaShapedTexture   *stex,
+         }
+     }
+ 
+-  use_opaque_region = stex->opaque_region && opacity == 255;
++  use_opaque_region = stex->opaque_region &&
++                      opacity == 255 &&
++                      !has_rounded_clip (stex);
+ 
+   if (use_opaque_region)
+     {
+@@ -1380,6 +1474,28 @@ meta_shaped_texture_set_snippet (MetaShapedTexture *stex,
+     stex->snippet = g_object_ref (snippet);
+ }
+ 
++void
++meta_shaped_texture_set_rounded_clip (MetaShapedTexture      *stex,
++                                      const graphene_rect_t *bounds,
++                                      float                  radius)
++{
++  g_return_if_fail (META_IS_SHAPED_TEXTURE (stex));
++  g_return_if_fail (bounds || radius <= 0.0f);
++
++  radius = MAX (radius, 0.0f);
++
++  if (G_APPROX_VALUE (stex->rounded_clip_radius, radius, FLT_EPSILON) &&
++      (radius == 0.0f ||
++       graphene_rect_equal (&stex->rounded_clip_bounds, bounds)))
++    return;
++
++  stex->rounded_clip_radius = radius;
++  if (bounds)
++    stex->rounded_clip_bounds = *bounds;
++
++  meta_shaped_texture_reset_pipelines (stex);
++}
++
+ /**
+  * meta_shaped_texture_get_texture:
+  * @stex: The #MetaShapedTexture
+@@ -1416,6 +1532,9 @@ meta_shaped_texture_set_opaque_region (MetaShapedTexture *stex,
+ MtkRegion *
+ meta_shaped_texture_get_opaque_region (MetaShapedTexture *stex)
+ {
++  if (has_rounded_clip (stex))
++    return NULL;
++
+   return stex->opaque_region;
+ }
+ 
+@@ -1454,6 +1573,9 @@ meta_shaped_texture_is_opaque (MetaShapedTexture *stex)
+   MetaMultiTexture *multi_texture;
+   MtkRectangle opaque_rect;
+ 
++  if (has_rounded_clip (stex))
++    return FALSE;
++
+   multi_texture = stex->texture;
+   if (!multi_texture)
+     return TRUE;
+diff --git a/src/compositor/meta-window-actor-wayland.c b/src/compositor/meta-window-actor-wayland.c
+index a9bda6d..88c2dd0 100644
+--- a/src/compositor/meta-window-actor-wayland.c
++++ b/src/compositor/meta-window-actor-wayland.c
+@@ -24,6 +24,7 @@
+ #include "backends/meta-settings-private.h"
+ #include "compositor/clutter-utils.h"
+ #include "compositor/meta-cullable.h"
++#include "compositor/meta-shaped-texture-private.h"
+ #include "compositor/meta-surface-actor-wayland.h"
+ #include "compositor/meta-window-actor-wayland.h"
+ #include "meta/meta-window-actor.h"
+@@ -58,6 +59,7 @@ struct _MetaWindowActorWayland
+ };
+ 
+ static void cullable_iface_init (MetaCullableInterface *iface);
++static void sync_surface_tree_clip (MetaWindowActorWayland *self);
+ 
+ G_DEFINE_TYPE_WITH_CODE (MetaWindowActorWayland, meta_window_actor_wayland,
+                          META_TYPE_WINDOW_ACTOR,
+@@ -473,6 +475,7 @@ meta_window_actor_wayland_before_paint (MetaWindowActor  *actor,
+                                         ClutterStageView *stage_view,
+                                         ClutterFrame     *frame)
+ {
++  sync_surface_tree_clip (META_WINDOW_ACTOR_WAYLAND (actor));
+ }
+ 
+ static void
+@@ -631,11 +634,23 @@ sync_surface_tree_clip (MetaWindowActorWayland *self)
+   ClutterActor *surface_container = CLUTTER_ACTOR (self->surface_container);
+   MtkRectangle frame_rect;
+   MtkRectangle buffer_rect;
++  graphene_rect_t rounded_bounds;
++  ClutterActor *child;
++  ClutterActorIter iter;
+   int geometry_scale;
+ 
+   if (!should_clip_surface_tree (window))
+     {
+       clutter_actor_remove_clip (surface_container);
++
++      clutter_actor_iter_init (&iter, surface_container);
++      while (clutter_actor_iter_next (&iter, &child))
++        {
++          MetaShapedTexture *texture =
++            meta_surface_actor_get_texture (META_SURFACE_ACTOR (child));
++
++          meta_shaped_texture_set_rounded_clip (texture, NULL, 0.0f);
++        }
+       return;
+     }
+ 
+@@ -648,6 +663,27 @@ sync_surface_tree_clip (MetaWindowActorWayland *self)
+                           (frame_rect.y - buffer_rect.y) / (float) geometry_scale,
+                           frame_rect.width / (float) geometry_scale,
+                           frame_rect.height / (float) geometry_scale);
++
++  rounded_bounds = GRAPHENE_RECT_INIT (
++    (frame_rect.x - buffer_rect.x) / (float) geometry_scale,
++    (frame_rect.y - buffer_rect.y) / (float) geometry_scale,
++    frame_rect.width / (float) geometry_scale,
++    frame_rect.height / (float) geometry_scale);
++
++  clutter_actor_iter_init (&iter, surface_container);
++  while (clutter_actor_iter_next (&iter, &child))
++    {
++      ClutterActorBox child_box;
++      graphene_rect_t child_bounds = rounded_bounds;
++      MetaShapedTexture *texture =
++        meta_surface_actor_get_texture (META_SURFACE_ACTOR (child));
++
++      clutter_actor_get_allocation_box (child, &child_box);
++      child_bounds.origin.x -= child_box.x1;
++      child_bounds.origin.y -= child_box.y1;
++
++      meta_shaped_texture_set_rounded_clip (texture, &child_bounds, 16.0f);
++    }
+ }
+ 
+ static gboolean
+-- 
+2.53.0

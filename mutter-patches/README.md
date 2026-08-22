@@ -15,6 +15,13 @@ Fedora spec 或构建环境修改属于 `packaging/fedora/`，不应混入功能
      `bufferRect` 的几何裁切完整 surface tree，因此也覆盖 subsurface 阴影。
    - 只处理 normal、dialog 和 modal-dialog；最大化与全屏时恢复原始路径。
    - 该补丁只做矩形裁切，不包含圆角 alpha 或 compositor 阴影。
+2. `0002-compositor-round-wayland-surface-trees.patch`
+   - 在每个 Wayland surface 的 `MetaShapedTexture` pipeline 中乘入圆角 alpha，
+     不创建整窗 offscreen framebuffer，也不额外采样窗口纹理。
+   - 使用变换前的 destination texture 坐标和 fragment derivative 抗锯齿，
+     覆盖分数缩放、actor transform、clone 与 subsurface。
+   - 圆角启用时禁用 opaque-region bypass 与 direct scanout 判定，避免不透明
+     客户端绕过 alpha；当前默认半径为 16 logical px。
 
 开发测试可用环境变量启用，不修改用户设置：
 
