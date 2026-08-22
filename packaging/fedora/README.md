@@ -48,8 +48,9 @@
 每个倍率的截图与日志保存在独立 artifact 目录。
 
 安装脚本只升级当前已经安装的 Mutter 子包。它会先把这些包的官方 RPM 下载到
-`_build/fedora/rollback/` 并保存精确版本清单，再从禁用仓库的本地事务安装，
-最后在不覆盖其他 experimental feature 的前提下启用 `window-appearance`：
+`_build/fedora/rollback/`，保存精确版本清单与安装前的完整 experimental feature
+列表，再从禁用仓库的本地事务安装，最后在不覆盖其他 feature 的前提下启用
+`window-appearance`：
 
     ./packaging/fedora/install-rpms.sh
 
@@ -59,10 +60,13 @@
 
 安装后需登出并重新登录。恢复官方包及原有 feature 列表：
 
+    ./packaging/fedora/verify-live-session.sh
+
     ./packaging/fedora/rollback-rpms.sh
 
-回滚只使用安装前缓存的精确 RPM，不依赖当时的网络或仓库状态。也可在官方包
-仍可用时执行 `sudo dnf5 distro-sync 'mutter*'`，但缓存回滚更可预测。
+回滚只使用安装前缓存的精确 RPM，并原样恢复 feature 列表，不依赖当时的网络
+或仓库状态。也可在官方包仍可用时执行 `sudo dnf5 distro-sync 'mutter*'`，但缓存
+回滚更可预测。
 
 ## 更新门禁
 
