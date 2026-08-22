@@ -11,3 +11,14 @@
 - 实现：无效果、空 offscreen effect、扩展圆角、Mutter 原生圆角。
 
 渲染比较应单独评估正文清晰度、圆角覆盖和阴影，不只保存主观截图。
+
+## Mutter 原生路线
+
+先编译补丁栈，再使用构建目录中的 libmutter 启动无头嵌套 Shell：
+
+    ./scripts/test-mutter-patches.sh
+    ./tests/run-mutter-nested.sh
+
+嵌套测试通过环境变量启用 experimental feature，不更改当前桌面设置；它会
+确认 Shell 实际映射了构建目录中的 libmutter，在 250% 缩放下启动带客户端
+阴影的 GTK Wayland 窗口，并验证 frame 外、buffer 内的像素已经显示为背景。

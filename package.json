@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/unit/*.test.js"
+    "test": "node --test tests/unit/*.test.js",
+    "test:mutter": "scripts/test-mutter-patches.sh",
+    "test:mutter:nested": "tests/run-mutter-nested.sh"
   }
 }

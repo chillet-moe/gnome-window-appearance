@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: GNOME Window Appearance <gnome-window-appearance@chillet.moe>
+Date: Sat, 22 Aug 2026 00:00:00 +0800
+Subject: [PATCH] compositor: Clip Wayland surface trees to window geometry
+
+Add an opt-in experimental feature that clips normal and dialog Wayland
+surface trees to the window geometry declared by the client. This removes
+client-side shadows, including shadows submitted as subsurfaces, at the
+surface-container level without introducing an offscreen framebuffer.
+
+Keep maximized and fullscreen windows untouched. The feature is deliberately
+limited to rectangular clipping; rounded alpha and compositor shadows belong
+in follow-up patches so each rendering change remains independently testable.
+
+Target: Mutter 50.4
+Depends-on: none
+Tested-by: scripts/test-mutter-patches.sh
+---
+ data/org.gnome.mutter.gschema.xml.in       |  7 +++
+ src/backends/meta-settings-private.h       |  1 +
+ src/backends/meta-settings.c               |  3 ++
+ src/compositor/meta-window-actor-wayland.c | 59 ++++++++++++++++++++++
+ 4 files changed, 70 insertions(+)
+
+diff --git a/data/org.gnome.mutter.gschema.xml.in b/data/org.gnome.mutter.gschema.xml.in
+--- a/data/org.gnome.mutter.gschema.xml.in
++++ b/data/org.gnome.mutter.gschema.xml.in
+@@ -5,6 +5,7 @@
+     <value nick="kms-modifiers" value="2"/>
+     <value nick="autoclose-xwayland" value="4"/>
+     <value nick="xwayland-native-scaling" value="8"/>
++    <value nick="window-appearance" value="16"/>
+   </flags>
+ 
+   <schema id="org.gnome.mutter" path="/org/gnome/mutter/"
+@@ -122,6 +123,12 @@
+         • “autoclose-xwayland”        — automatically terminates Xwayland if all
+                                         relevant X11 clients are gone.
+                                         Requires a restart.
++
++        • “window-appearance”         — clips eligible Wayland surface trees to
++                                        their declared window geometry. This
++                                        removes client-side shadows before the
++                                        compositor applies a unified appearance.
++                                        Requires a restart.
+       </description>
+     </key>
+ 
+diff --git a/src/backends/meta-settings-private.h b/src/backends/meta-settings-private.h
+--- a/src/backends/meta-settings-private.h
++++ b/src/backends/meta-settings-private.h
+@@ -31,6 +31,7 @@ typedef enum _MetaExperimentalFeature
+   META_EXPERIMENTAL_FEATURE_NONE = 0,
+   META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS  = (1 << 0),
+   META_EXPERIMENTAL_FEATURE_AUTOCLOSE_XWAYLAND  = (1 << 1),
++  META_EXPERIMENTAL_FEATURE_WINDOW_APPEARANCE  = (1 << 2),
+ } MetaExperimentalFeature;
+ 
+ typedef enum _MetaXwaylandExtension
+diff --git a/src/backends/meta-settings.c b/src/backends/meta-settings.c
+--- a/src/backends/meta-settings.c
++++ b/src/backends/meta-settings.c
+@@ -47,6 +47,7 @@ static GDebugKey experimental_feature_keys[] = {
+   { "kms-modifiers", META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS },
+   { "autoclose-xwayland", META_EXPERIMENTAL_FEATURE_AUTOCLOSE_XWAYLAND },
++  { "window-appearance", META_EXPERIMENTAL_FEATURE_WINDOW_APPEARANCE },
+ };
+ 
+ static guint signals[N_SIGNALS];
+ 
+@@ -304,6 +305,8 @@ experimental_features_handler (GVariant *features_variant,
+         feature = META_EXPERIMENTAL_FEATURE_KMS_MODIFIERS;
+       else if (g_str_equal (feature_str, "autoclose-xwayland"))
+         feature = META_EXPERIMENTAL_FEATURE_AUTOCLOSE_XWAYLAND;
++      else if (g_str_equal (feature_str, "window-appearance"))
++        feature = META_EXPERIMENTAL_FEATURE_WINDOW_APPEARANCE;
+ 
+       if (feature)
+         g_message ("Enabling experimental feature '%s'", feature_str);
+ 
+diff --git a/src/compositor/meta-window-actor-wayland.c b/src/compositor/meta-window-actor-wayland.c
+--- a/src/compositor/meta-window-actor-wayland.c
++++ b/src/compositor/meta-window-actor-wayland.c
+@@ -20,6 +20,8 @@
+ 
+ #include "config.h"
+ 
++#include "backends/meta-backend-private.h"
++#include "backends/meta-settings-private.h"
+ #include "compositor/clutter-utils.h"
+ #include "compositor/meta-cullable.h"
+ #include "compositor/meta-surface-actor-wayland.h"
+@@ -594,6 +596,61 @@ maybe_configure_black_background (MetaWindowActorWayland *self,
+ }
+ 
+ static gboolean
++should_clip_surface_tree (MetaWindow *window)
++{
++  MetaContext *context;
++  MetaBackend *backend;
++  MetaSettings *settings;
++
++  if (meta_window_is_fullscreen (window) || meta_window_is_maximized (window))
++    return FALSE;
++
++  switch (meta_window_get_window_type (window))
++    {
++    case META_WINDOW_NORMAL:
++    case META_WINDOW_DIALOG:
++    case META_WINDOW_MODAL_DIALOG:
++      break;
++    default:
++      return FALSE;
++    }
++
++  context = meta_display_get_context (window->display);
++  backend = meta_context_get_backend (context);
++  settings = meta_backend_get_settings (backend);
++
++  return meta_settings_is_experimental_feature_enabled (
++    settings, META_EXPERIMENTAL_FEATURE_WINDOW_APPEARANCE);
++}
++
++static void
++sync_surface_tree_clip (MetaWindowActorWayland *self)
++{
++  MetaWindowActor *window_actor = META_WINDOW_ACTOR (self);
++  MetaWindow *window = meta_window_actor_get_meta_window (window_actor);
++  ClutterActor *surface_container = CLUTTER_ACTOR (self->surface_container);
++  MtkRectangle frame_rect;
++  MtkRectangle buffer_rect;
++  int geometry_scale;
++
++  if (!should_clip_surface_tree (window))
++    {
++      clutter_actor_remove_clip (surface_container);
++      return;
++    }
++
++  meta_window_get_frame_rect (window, &frame_rect);
++  meta_window_get_buffer_rect (window, &buffer_rect);
++  geometry_scale = meta_window_actor_get_geometry_scale (window_actor);
++
++  clutter_actor_set_clip (surface_container,
++                          (frame_rect.x - buffer_rect.x) / (float) geometry_scale,
++                          (frame_rect.y - buffer_rect.y) / (float) geometry_scale,
++                          frame_rect.width / (float) geometry_scale,
++                          frame_rect.height / (float) geometry_scale);
++}
++
++static gboolean
+ do_sync_geometry (MetaWindowActorWayland *self)
+ {
+   MetaWindowActor *actor = META_WINDOW_ACTOR (self);
+@@ -608,6 +665,8 @@ do_sync_geometry (MetaWindowActorWayland *self)
+   if (!clutter_actor_is_mapped (CLUTTER_ACTOR (actor)))
+     return FALSE;
+ 
++  sync_surface_tree_clip (self);
++
+   if (maybe_configure_black_background (self,
+                                         &surfaces_width, &surfaces_height,
+                                         &background_width, &background_height))
+-- 
+2.55.0

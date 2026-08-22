@@ -90,6 +90,37 @@ export class WindowAppearanceManager {
             return;
         }
 
+        if (GLib.getenv('GWA_TEST_CAPTURE_ONLY') === '1') {
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 250, () => {
+                const findContentActor = currentActor => {
+                    if (currentActor.content === actor.get_texture())
+                        return currentActor;
+                    for (const child of currentActor.get_children()) {
+                        const result = findContentActor(child);
+                        if (result)
+                            return result;
+                    }
+                    return null;
+                };
+                const contentActor = findContentActor(actor);
+                const nativeClip = contentActor?.get_parent()?.has_clip ?? false;
+                const frame = window.get_frame_rect();
+                const buffer = window.get_buffer_rect();
+                console.log(
+                    '[gnome-window-appearance] capture-only ' +
+                    window.get_wm_class() + ' ' +
+                    'frame=' + frame.width + 'x' + frame.height +
+                    '+' + frame.x + '+' + frame.y + ' ' +
+                    'buffer=' + buffer.width + 'x' + buffer.height +
+                    '+' + buffer.x + '+' + buffer.y + ' ' +
+                    'native-clip=' + nativeClip,
+                );
+                scheduleTestCapture(window);
+                return GLib.SOURCE_REMOVE;
+            });
+            return;
+        }
+
         const effect = new WindowAppearanceEffect(actor, this.#settings);
         if (effect.enable()) {
             this.#effects.set(actor, effect);
