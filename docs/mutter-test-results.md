@@ -6,7 +6,7 @@
 `scripts/prepare-mutter-source.sh` 从干净源码重新应用，随后以 Meson debug
 配置完整编译 `libmutter-18.so.0.0.0` 及其 Cogl、Clutter、MTK 依赖。
 
-前两个补丁验证结果：
+前三个补丁验证结果：
 
 - `git apply` 可严格解析补丁栈，Mutter 编译无警告或错误；
 - 无头 GNOME Shell 的 `/proc/<pid>/maps` 确认加载构建目录中的 patched
@@ -26,6 +26,13 @@
 - 250% 缩放下圆角使用最终 fragment coverage，不经过整窗 FBO；
 - 同一 probe 依次执行普通、最大化、恢复、全屏、再次恢复：最大化与全屏时
   native clip 均关闭且红色方角可见，两次恢复后 native clip 与四个圆角均恢复；
+- compositor 在圆角 frame 外绘制一份独立阴影，像素采样确认阴影可见，且
+  透明角下没有正文或客户端阴影泄漏；最大化和全屏时该阴影随外观路径关闭；
+- Overview 中 `MetaWindowActor` 存在 mapped clone，截图保持圆角与阴影；退出
+  Overview 后 clone 被清理且原窗口外观保持；
+- 默认 Xwayland 配置从干净源码完整编译 694 个目标；另以
+  `-Dxwayland=false -Dtests=disabled` 完整编译 664 个目标，验证 Wayland 阴影
+  不会隐式依赖 Xwayland 构建条件；
 - Shell 日志没有 JavaScript error、断言失败或崩溃。
 
 测试命令：
@@ -33,6 +40,6 @@
     ./scripts/test-mutter-patches.sh
     ./tests/run-mutter-nested.sh
 
-当前结果覆盖矩形裁切、原生圆角 alpha、最大化/全屏状态切换和合成的
-`wl_subsurface` 回归客户端。compositor 阴影、overview、workspace、clone 和
-真实 JetBrains Runtime subsurface 仍待后续补丁与测试覆盖。
+当前结果覆盖矩形裁切、原生圆角 alpha、compositor 阴影、最大化/全屏状态
+切换、Overview clone 和合成的 `wl_subsurface` 回归客户端。workspace 切换、
+真实 JetBrains Runtime subsurface 和 200%/300% 渲染矩阵仍待扩大覆盖。

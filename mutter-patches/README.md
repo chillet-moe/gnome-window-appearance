@@ -21,7 +21,16 @@ Fedora spec 或构建环境修改属于 `packaging/fedora/`，不应混入功能
    - 使用变换前的 destination texture 坐标和 fragment derivative 抗锯齿，
      覆盖分数缩放、actor transform、clone 与 subsurface。
    - 圆角启用时禁用 opaque-region bypass 与 direct scanout 判定，避免不透明
-     客户端绕过 alpha；当前默认半径为 16 logical px。
+   客户端绕过 alpha；当前默认半径为 16 logical px。
+3. `0003-compositor-shadow-wayland-surface-trees.patch`
+   - 复用 Mutter 的缓存九宫格阴影实现，在 Wayland window actor 中先绘制一份
+     compositor 阴影，再绘制完整 surface tree；不创建或重采样整窗纹理。
+   - 阴影与圆角正文使用同一 frame geometry，并从阴影 clip 中减去圆角正文，
+     防止透明角下方漏出阴影。
+   - 分别缓存 focused/unfocused 阴影，把阴影边界并入 paint volume；阴影随
+     window actor 的动画和 clone 一起变换。
+   - 将实际与 X11 无关的 shadow factory/window shape 源文件改为始终构建，
+     已验证 `-Dxwayland=false` 配置。
 
 开发测试可用环境变量启用，不修改用户设置：
 

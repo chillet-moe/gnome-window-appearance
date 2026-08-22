@@ -120,7 +120,8 @@ export class WindowAppearanceManager {
                     'native-clip=' + nativeClip,
                 );
                 scheduleTestCapture(window, () =>
-                    contentActor?.get_parent()?.has_clip ?? false);
+                    contentActor?.get_parent()?.has_clip ?? false,
+                () => actor.has_mapped_clones());
                 return GLib.SOURCE_REMOVE;
             });
             return;

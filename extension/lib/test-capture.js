@@ -1,6 +1,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 let captureScheduled = false;
 
@@ -37,25 +38,29 @@ function captureScreenshot(artifactDir, filename, onComplete = null) {
     });
 }
 
-function scheduleStateTransitions(window, artifactDir, getNativeClip) {
+function scheduleStateTransitions(window, artifactDir, getNativeClip,
+                                  getHasMappedClones) {
     const states = [
-        ['maximized', () => window.maximize(), 'mutter-native-maximized.png'],
-        ['restored', () => window.unmaximize(), 'mutter-native-restored.png'],
-        ['fullscreen', () => window.make_fullscreen(), 'mutter-native-fullscreen.png'],
-        ['restored-final', () => window.unmake_fullscreen(), 'mutter-native-restored-final.png'],
+        ['maximized', () => window.maximize(), 'mutter-native-maximized.png', 600],
+        ['restored', () => window.unmaximize(), 'mutter-native-restored.png', 600],
+        ['fullscreen', () => window.make_fullscreen(), 'mutter-native-fullscreen.png', 600],
+        ['restored-final', () => window.unmake_fullscreen(), 'mutter-native-restored-final.png', 600],
+        ['overview', () => Main.overview.show(), 'mutter-native-overview.png', 900],
+        ['overview-restored', () => Main.overview.hide(), 'mutter-native-overview-restored.png', 900],
     ];
 
     const advance = index => {
         if (index >= states.length)
             return;
 
-        const [name, transition, filename] = states[index];
+        const [name, transition, filename, delay] = states[index];
         transition();
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
             const frame = window.get_frame_rect();
             console.log(
                 `[gnome-window-appearance] state=${name} ` +
                 `native-clip=${getNativeClip?.() ?? false} ` +
+                `mapped-clones=${getHasMappedClones?.() ?? false} ` +
                 `frame=${frame.width}x${frame.height}+${frame.x}+${frame.y}`,
             );
             captureScreenshot(artifactDir, filename, () => advance(index + 1));
@@ -66,7 +71,8 @@ function scheduleStateTransitions(window, artifactDir, getNativeClip) {
     advance(0);
 }
 
-export function scheduleTestCapture(window, getNativeClip = null) {
+export function scheduleTestCapture(window, getNativeClip = null,
+                                    getHasMappedClones = null) {
     const artifactDir = GLib.getenv('TEST_ARTIFACT_DIR');
     const testWmClass = GLib.getenv('GWA_TEST_WM_CLASS') ?? 'window-probe';
     if (!artifactDir || captureScheduled ||
@@ -78,7 +84,8 @@ export function scheduleTestCapture(window, getNativeClip = null) {
     GLib.timeout_add(GLib.PRIORITY_DEFAULT, 750, () => {
         captureScreenshot(artifactDir, 'fractional-2.5.png', success => {
             if (success && GLib.getenv('GWA_TEST_STATE_TRANSITIONS') === '1')
-                scheduleStateTransitions(window, artifactDir, getNativeClip);
+                scheduleStateTransitions(window, artifactDir, getNativeClip,
+                                         getHasMappedClones);
         });
         return GLib.SOURCE_REMOVE;
     });

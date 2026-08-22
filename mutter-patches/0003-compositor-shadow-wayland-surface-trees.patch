@@ -1,0 +1,415 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: GNOME Window Appearance <gnome-window-appearance@chillet.moe>
+Date: Sat, 22 Aug 2026 00:00:00 +0800
+Subject: [PATCH] compositor: Add native shadows to Wayland windows
+
+Paint one compositor-owned shadow beneath eligible Wayland surface trees,
+using the same rounded frame geometry as the native alpha clip. Reuse
+Mutter's cached nine-slice shadow implementation and keep focused and
+unfocused variants, while clipping the shadow away from the transparent
+window corners.
+
+Include shadow bounds in the window actor paint volume. Because the shadow
+is painted by the window actor before its children, Shell animations and
+clones transform the content and shadow together without an extra window
+texture pass.
+
+Build the existing generic shadow factory and shape helpers independently
+of Xwayland so Wayland-only builds retain the feature.
+
+Target: Mutter 50.4
+Depends-on: 0002-compositor-round-wayland-surface-trees.patch
+Tested-by: scripts/test-mutter-patches.sh
+Tested-by: tests/run-mutter-nested.sh
+---
+
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -383,6 +383,10 @@
+   'core/window-private.h',
+   'core/workspace.c',
+   'core/workspace-private.h',
++  'x11/meta-shadow-factory.c',
++  'x11/meta-shadow-factory.h',
++  'x11/meta-window-shape.c',
++  'x11/meta-window-shape.h',
+ ]
+ 
+ if have_xwayland
+@@ -396,14 +400,10 @@
+     'x11/group-props.h',
+     'x11/meta-selection-source-x11.c',
+     'x11/meta-selection-source-x11-private.h',
+-    'x11/meta-shadow-factory.c',
+-    'x11/meta-shadow-factory.h',
+     'x11/meta-startup-notification-x11.c',
+     'x11/meta-startup-notification-x11.h',
+     'x11/meta-sync-counter.c',
+     'x11/meta-sync-counter.h',
+-    'x11/meta-window-shape.c',
+-    'x11/meta-window-shape.h',
+     'x11/meta-x11-display.c',
+     'x11/meta-x11-display-private.h',
+     'x11/meta-x11-event-source.c',
+--- a/src/x11/meta-shadow-factory.c
++++ b/src/x11/meta-shadow-factory.c
+@@ -113,7 +113,8 @@
+   { "popup-menu",    { 1, -1, 0, 0, 128 }, { 1, -1, 0, 0, 128 } },
+   { "dropdown-menu", { 1, -1, 0, 0, 128 }, { 1, -1, 0, 0, 128 } },
+ 
+-  { "attached",      { 10, -1, 0, 3, 128 }, { 8, -1, 0, 2, 64 } }
++  { "attached",      { 10, -1, 0, 3, 128 }, { 8, -1, 0, 2, 64 } },
++  { "window-appearance", { 14, -1, 0, 8, 97 }, { 12, -1, 0, 6, 64 } }
+ };
+ 
+ G_DEFINE_TYPE (MetaShadowFactory, meta_shadow_factory, G_TYPE_OBJECT);
+--- a/src/compositor/meta-window-actor-wayland.c
++++ b/src/compositor/meta-window-actor-wayland.c
+@@ -20,6 +20,8 @@
+ 
+ #include "config.h"
+ 
++#include <math.h>
++
+ #include "backends/meta-backend-private.h"
+ #include "backends/meta-settings-private.h"
+ #include "compositor/clutter-utils.h"
+@@ -33,6 +35,7 @@
+ #include "wayland/meta-wayland-single-pixel-buffer.h"
+ #include "wayland/meta-wayland-surface-private.h"
+ #include "wayland/meta-window-wayland.h"
++#include "x11/meta-shadow-factory.h"
+ 
+ struct _MetaSurfaceContainerActorWayland
+ {
+@@ -55,6 +58,12 @@
+   ClutterActor *background;
+   MetaSurfaceContainerActorWayland *surface_container;
+   gulong highest_scale_monitor_handler_id;
++  MetaShadowFactory *shadow_factory;
++  MetaShadow *focused_shadow;
++  MetaShadow *unfocused_shadow;
++  MetaWindowShape *shadow_shape;
++  MtkRegion *rounded_frame_region;
++  MtkRectangle frame_bounds;
+   gboolean needs_sync;
+ };
+ 
+@@ -626,6 +635,129 @@
+     settings, META_EXPERIMENTAL_FEATURE_WINDOW_APPEARANCE);
+ }
+ 
++static MtkRegion *
++create_rounded_rectangle_region (int width,
++                                 int height,
++                                 int radius)
++{
++  MtkRegion *region = mtk_region_create ();
++
++  radius = CLAMP (radius, 0, MIN (width, height) / 2);
++  for (int y = 0; y < height; y++)
++    {
++      float distance_from_center = 0.0f;
++      int inset = 0;
++
++      if (y < radius)
++        distance_from_center = radius - y - 0.5f;
++      else if (y >= height - radius)
++        distance_from_center = y + 0.5f - (height - radius);
++
++      if (distance_from_center > 0.0f)
++        {
++          inset = (int) ceilf (radius -
++                               sqrtf (radius * radius -
++                                      distance_from_center *
++                                      distance_from_center));
++        }
++
++      if (width > 2 * inset)
++        {
++          mtk_region_union_rectangle (
++            region,
++            &MTK_RECTANGLE_INIT (inset, y, width - 2 * inset, 1));
++        }
++    }
++
++  return region;
++}
++
++static void
++clear_window_shadows (MetaWindowActorWayland *self)
++{
++  g_clear_pointer (&self->focused_shadow, meta_shadow_unref);
++  g_clear_pointer (&self->unfocused_shadow, meta_shadow_unref);
++}
++
++static void
++sync_shadow_geometry (MetaWindowActorWayland *self,
++                      const MtkRectangle     *frame_bounds)
++{
++  g_autoptr (MtkRegion) shape_region = NULL;
++
++  if (self->rounded_frame_region &&
++      mtk_rectangle_equal (&self->frame_bounds, frame_bounds))
++    return;
++
++  clear_window_shadows (self);
++  g_clear_pointer (&self->shadow_shape, meta_window_shape_unref);
++  g_clear_pointer (&self->rounded_frame_region, mtk_region_unref);
++
++  self->frame_bounds = *frame_bounds;
++  shape_region = create_rounded_rectangle_region (frame_bounds->width,
++                                                   frame_bounds->height,
++                                                   16);
++  self->shadow_shape = meta_window_shape_new (shape_region);
++
++  self->rounded_frame_region = g_steal_pointer (&shape_region);
++  mtk_region_translate (self->rounded_frame_region,
++                        frame_bounds->x, frame_bounds->y);
++}
++
++static MetaShadow *
++ensure_window_shadow (MetaWindowActorWayland *self,
++                      gboolean                appears_focused)
++{
++  MetaShadow **shadow = appears_focused
++    ? &self->focused_shadow
++    : &self->unfocused_shadow;
++
++  if (!self->shadow_shape)
++    return NULL;
++
++  if (!*shadow)
++    {
++      ClutterContext *clutter_context =
++        clutter_actor_get_context (CLUTTER_ACTOR (self));
++      ClutterBackend *clutter_backend =
++        clutter_context_get_backend (clutter_context);
++      CoglContext *cogl_context =
++        clutter_backend_get_cogl_context (clutter_backend);
++
++      *shadow = meta_shadow_factory_get_shadow (self->shadow_factory,
++                                                self->shadow_shape,
++                                                self->frame_bounds.width,
++                                                self->frame_bounds.height,
++                                                "window-appearance",
++                                                appears_focused,
++                                                cogl_context);
++    }
++
++  return *shadow;
++}
++
++static void
++disable_window_appearance (MetaWindowActorWayland *self)
++{
++  ClutterActor *surface_container = CLUTTER_ACTOR (self->surface_container);
++  ClutterActor *child;
++  ClutterActorIter iter;
++
++  clutter_actor_remove_clip (surface_container);
++  clear_window_shadows (self);
++  g_clear_pointer (&self->shadow_shape, meta_window_shape_unref);
++  g_clear_pointer (&self->rounded_frame_region, mtk_region_unref);
++
++  clutter_actor_iter_init (&iter, surface_container);
++  while (clutter_actor_iter_next (&iter, &child))
++    {
++      MetaShapedTexture *texture =
++        meta_surface_actor_get_texture (META_SURFACE_ACTOR (child));
++
++      meta_shaped_texture_set_rounded_clip (texture, NULL, 0.0f);
++    }
++}
++
+ static void
+ sync_surface_tree_clip (MetaWindowActorWayland *self)
+ {
+@@ -641,16 +773,7 @@
+ 
+   if (!should_clip_surface_tree (window))
+     {
+-      clutter_actor_remove_clip (surface_container);
+-
+-      clutter_actor_iter_init (&iter, surface_container);
+-      while (clutter_actor_iter_next (&iter, &child))
+-        {
+-          MetaShapedTexture *texture =
+-            meta_surface_actor_get_texture (META_SURFACE_ACTOR (child));
+-
+-          meta_shaped_texture_set_rounded_clip (texture, NULL, 0.0f);
+-        }
++      disable_window_appearance (self);
+       return;
+     }
+ 
+@@ -669,6 +792,12 @@
+     (frame_rect.y - buffer_rect.y) / (float) geometry_scale,
+     frame_rect.width / (float) geometry_scale,
+     frame_rect.height / (float) geometry_scale);
++  sync_shadow_geometry (
++    self,
++    &MTK_RECTANGLE_INIT ((int) roundf (rounded_bounds.origin.x),
++                         (int) roundf (rounded_bounds.origin.y),
++                         (int) roundf (rounded_bounds.size.width),
++                         (int) roundf (rounded_bounds.size.height)));
+ 
+   clutter_actor_iter_init (&iter, surface_container);
+   while (clutter_actor_iter_next (&iter, &child))
+@@ -686,6 +815,127 @@
+     }
+ }
+ 
++static void
++get_window_shadow_params (MetaWindowActorWayland *self,
++                          gboolean                appears_focused,
++                          MetaShadowParams       *params)
++{
++  meta_shadow_factory_get_params (self->shadow_factory,
++                                  "window-appearance",
++                                  appears_focused,
++                                  params);
++}
++
++static void
++get_window_shadow_bounds (MetaWindowActorWayland *self,
++                          gboolean                appears_focused,
++                          MetaShadow             *shadow,
++                          MtkRectangle           *bounds)
++{
++  MetaShadowParams params;
++
++  get_window_shadow_params (self, appears_focused, &params);
++  meta_shadow_get_bounds (shadow,
++                          params.x_offset + self->frame_bounds.x,
++                          params.y_offset + self->frame_bounds.y,
++                          self->frame_bounds.width,
++                          self->frame_bounds.height,
++                          bounds);
++}
++
++static void
++meta_window_actor_wayland_paint (ClutterActor        *actor,
++                                 ClutterPaintContext *paint_context)
++{
++  MetaWindowActorWayland *self = META_WINDOW_ACTOR_WAYLAND (actor);
++  MetaWindow *window =
++    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (self));
++  gboolean appears_focused;
++  MetaShadow *shadow;
++
++  sync_surface_tree_clip (self);
++  appears_focused = meta_window_appears_focused (window);
++  shadow = ensure_window_shadow (self, appears_focused);
++
++  if (shadow)
++    {
++      MetaShadowParams params;
++      MtkRectangle shadow_bounds;
++      g_autoptr (MtkRegion) clip = NULL;
++      CoglFramebuffer *framebuffer;
++
++      get_window_shadow_params (self, appears_focused, &params);
++      get_window_shadow_bounds (self, appears_focused, shadow,
++                                &shadow_bounds);
++      clip = mtk_region_create_rectangle (&shadow_bounds);
++      mtk_region_subtract (clip, self->rounded_frame_region);
++
++      framebuffer = clutter_paint_context_get_framebuffer (paint_context);
++      meta_shadow_paint (shadow,
++                         framebuffer,
++                         params.x_offset + self->frame_bounds.x,
++                         params.y_offset + self->frame_bounds.y,
++                         self->frame_bounds.width,
++                         self->frame_bounds.height,
++                         (clutter_actor_get_paint_opacity (actor) *
++                          params.opacity * window->opacity) / (255 * 255),
++                         clip,
++                         TRUE);
++    }
++
++  CLUTTER_ACTOR_CLASS (meta_window_actor_wayland_parent_class)->paint (
++    actor, paint_context);
++}
++
++static gboolean
++meta_window_actor_wayland_get_paint_volume (ClutterActor       *actor,
++                                            ClutterPaintVolume *volume)
++{
++  MetaWindowActorWayland *self = META_WINDOW_ACTOR_WAYLAND (actor);
++  MetaWindow *window =
++    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (self));
++  gboolean appears_focused;
++  MetaShadow *shadow;
++  ClutterActor *child;
++  ClutterActorIter iter;
++
++  sync_surface_tree_clip (self);
++  appears_focused = meta_window_appears_focused (window);
++  shadow = ensure_window_shadow (self, appears_focused);
++  if (shadow)
++    {
++      MtkRectangle shadow_bounds;
++      ClutterActorBox shadow_box;
++
++      get_window_shadow_bounds (self, appears_focused, shadow,
++                                &shadow_bounds);
++      shadow_box = (ClutterActorBox) {
++        .x1 = shadow_bounds.x,
++        .y1 = shadow_bounds.y,
++        .x2 = shadow_bounds.x + shadow_bounds.width,
++        .y2 = shadow_bounds.y + shadow_bounds.height,
++      };
++      clutter_paint_volume_union_box (volume, &shadow_box);
++    }
++
++  clutter_actor_iter_init (&iter, actor);
++  while (clutter_actor_iter_next (&iter, &child))
++    {
++      g_autoptr (ClutterPaintVolume) child_volume = NULL;
++
++      if (!clutter_actor_is_mapped (child))
++        continue;
++
++      child_volume = clutter_actor_get_transformed_paint_volume (child, actor);
++      if (!child_volume)
++        return FALSE;
++
++      clutter_paint_volume_union (volume, child_volume);
++    }
++
++  return TRUE;
++}
++
+ static gboolean
+ do_sync_geometry (MetaWindowActorWayland *self)
+ {
+@@ -777,6 +1027,9 @@
+ 
+   g_clear_signal_handler (&self->highest_scale_monitor_handler_id,
+                           window);
++  clear_window_shadows (self);
++  g_clear_pointer (&self->shadow_shape, meta_window_shape_unref);
++  g_clear_pointer (&self->rounded_frame_region, mtk_region_unref);
+ 
+   parent_class->dispose (object);
+ }
+@@ -793,6 +1046,7 @@
+     g_signal_connect_swapped (window, "highest-scale-monitor-changed",
+                               G_CALLBACK (clutter_actor_notify_transform_invalid),
+                               self->surface_container);
++  self->shadow_factory = meta_shadow_factory_get_default ();
+ }
+ 
+ static void
+@@ -816,6 +1070,9 @@
+   window_actor_class->is_single_surface_actor = meta_window_actor_wayland_is_single_surface_actor;
+ 
+   clutter_actor_class->map = meta_window_actor_wayland_map;
++  clutter_actor_class->paint = meta_window_actor_wayland_paint;
++  clutter_actor_class->get_paint_volume =
++    meta_window_actor_wayland_get_paint_volume;
+ 
+   object_class->constructed = meta_window_actor_wayland_constructed;
+   object_class->dispose = meta_window_actor_wayland_dispose;
+

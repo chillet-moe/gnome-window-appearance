@@ -11,14 +11,16 @@ Fedora RPM 的构建和更新维护放在 `packaging/fedora/`，跨实现的验�
 
 ## 当前状态
 
-项目处于设计与原型准备阶段。已有调查表明，现有圆角扩展在小数缩放下的模糊主要来自 `Shell.GLSLEffect`/`ClutterOffscreenEffect` 引入的整窗离屏渲染和二次缩放，而不是圆角距离场计算本身。
+项目已完成针对 Fedora 44 / Mutter 50.4 的原生裁切、圆角 alpha 与 compositor
+阴影补丁，并通过 250% 嵌套 Shell、真实 `wl_subsurface`、窗口状态和 Overview
+clone 回归测试。实现只在现有 surface texture pipeline 中乘入圆角 coverage，
+不会引入整窗离屏渲染和二次缩放；当前工作重点是 Fedora RPM 打包与回滚。
 
 当前优先级：
 
-1. 建立可复现的清晰度与窗口几何测试基线。
-2. 验证扩展路线能否使用矩形 clip、主纹理 alpha mask 和独立阴影避开整窗 offscreen effect。
-3. 明确扩展 API 的不可绕过限制后，再将验证过的模型下沉到 Mutter。
-4. 以 Fedora SRPM patch 的方式打包原生实现，并自动跟随 Fedora Mutter 更新重建。
+1. 以 Fedora SRPM patch 的方式构建带可追溯 release 标识的 Mutter RPM。
+2. 验证 RPM 安装、重新登录、降级和 `dnf5 distro-sync` 回滚。
+3. 扩大客户端、缩放倍率、工作区和真实应用测试矩阵。
 
 ## 仓库结构
 

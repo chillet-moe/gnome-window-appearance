@@ -26,7 +26,7 @@
 
 - [x] 选定窗口 surface tree 的原生裁切入口。
 - [x] 选定不引入额外整窗采样的圆角实现位置。
-- [ ] 明确 compositor 阴影与现有 shape/阴影代码的所有权。
+- [x] 明确 compositor 阴影与现有 shape/阴影代码的所有权。
 - [x] 把矩形裁切与圆角 alpha 拆成可独立审查的最小补丁。
 - [x] 在 nested GNOME Shell 中完成首个矩形裁切补丁的 smoke test 和渲染对比。
 
@@ -51,7 +51,7 @@
 
 ## 当前下一步
 
-Mutter 50.4 已在 Wayland surface-container 层实现 window geometry 矩形裁切，
-并在每个 `MetaShapedTexture` pipeline 中实现不创建整窗 FBO 的圆角 alpha；
-250% 无头嵌套测试已覆盖真实 `wl_subsurface` 及普通、最大化、全屏、恢复状态
-切换。下一步确定 compositor 阴影所有权并实现统一阴影。
+Mutter 50.4 已完成原生矩形裁切、无整窗 FBO 的圆角 alpha 与 compositor
+统一阴影。250% 无头嵌套测试已覆盖真实 `wl_subsurface`、普通/最大化/全屏
+状态切换与 Overview clone；默认和无 Xwayland 构建均通过。下一步建立 Fedora
+SRPM patch 注入、可追溯 RPM 构建、安装检查与回滚流程。

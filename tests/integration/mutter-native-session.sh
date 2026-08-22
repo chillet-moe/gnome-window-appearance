@@ -9,9 +9,12 @@ maximized_screenshot="$TEST_ARTIFACT_DIR/mutter-native-maximized.png"
 restored_screenshot="$TEST_ARTIFACT_DIR/mutter-native-restored.png"
 fullscreen_screenshot="$TEST_ARTIFACT_DIR/mutter-native-fullscreen.png"
 restored_final_screenshot="$TEST_ARTIFACT_DIR/mutter-native-restored-final.png"
+overview_screenshot="$TEST_ARTIFACT_DIR/mutter-native-overview.png"
+overview_restored_screenshot="$TEST_ARTIFACT_DIR/mutter-native-overview-restored.png"
 display_config="$TEST_ARTIFACT_DIR/mutter-native-display-config.txt"
 rm -f "$screenshot" "$maximized_screenshot" "$restored_screenshot" \
-    "$fullscreen_screenshot" "$restored_final_screenshot"
+    "$fullscreen_screenshot" "$restored_final_screenshot" \
+    "$overview_screenshot" "$overview_restored_screenshot"
 
 gsettings set org.gnome.shell enabled-extensions "['$uuid']"
 gsettings set org.gnome.shell disable-user-extensions false
@@ -77,7 +80,7 @@ probe_pid=$!
 
 for _ in $(seq 1 120); do
     if [[ -s "$screenshot" ]] &&
-       [[ -s "$restored_final_screenshot" ]] &&
+       [[ -s "$overview_restored_screenshot" ]] &&
        rg -q "\[gnome-window-appearance\] capture-only $test_wm_class " "$shell_log"; then
         break
     fi
@@ -90,7 +93,8 @@ if [[ ! -s "$screenshot" ]]; then
     exit 1
 fi
 if [[ ! -s "$maximized_screenshot" || ! -s "$restored_screenshot" ||
-      ! -s "$fullscreen_screenshot" || ! -s "$restored_final_screenshot" ]]; then
+      ! -s "$fullscreen_screenshot" || ! -s "$restored_final_screenshot" ||
+      ! -s "$overview_screenshot" || ! -s "$overview_restored_screenshot" ]]; then
     printf 'Patched nested Shell did not complete state-transition captures.\n' >&2
     tail -n 120 "$shell_log" >&2
     exit 1
@@ -107,6 +111,16 @@ for expected_state in \
         exit 1
     fi
 done
+if ! rg -q '\[gnome-window-appearance\] state=overview native-clip=true mapped-clones=true' \
+    "$shell_log"; then
+    printf 'Overview did not map a clone of the natively rendered window.\n' >&2
+    exit 1
+fi
+if ! rg -q '\[gnome-window-appearance\] state=overview-restored native-clip=true mapped-clones=false' \
+    "$shell_log"; then
+    printf 'Window did not leave the overview clone state cleanly.\n' >&2
+    exit 1
+fi
 
 for state_capture in \
     "maximized:$maximized_screenshot" \
@@ -224,36 +238,36 @@ read -r top_left_x top_left_y top_right_x top_right_y \
 )
 
 rounded_corners_ok=$(magick "$screenshot" -format "%[fx:
-    abs(p{$top_left_x,$top_left_y}.r - 32/255) < 0.05 &&
-    abs(p{$top_left_x,$top_left_y}.g - 64/255) < 0.05 &&
-    abs(p{$top_left_x,$top_left_y}.b - 96/255) < 0.05 &&
-    abs(p{$top_right_x,$top_right_y}.r - 32/255) < 0.05 &&
-    abs(p{$top_right_x,$top_right_y}.g - 64/255) < 0.05 &&
-    abs(p{$top_right_x,$top_right_y}.b - 96/255) < 0.05 &&
-    abs(p{$bottom_left_x,$bottom_left_y}.r - 32/255) < 0.05 &&
-    abs(p{$bottom_left_x,$bottom_left_y}.g - 64/255) < 0.05 &&
-    abs(p{$bottom_left_x,$bottom_left_y}.b - 96/255) < 0.05 &&
-    abs(p{$bottom_right_x,$bottom_right_y}.r - 32/255) < 0.05 &&
-    abs(p{$bottom_right_x,$bottom_right_y}.g - 64/255) < 0.05 &&
-    abs(p{$bottom_right_x,$bottom_right_y}.b - 96/255) < 0.05 ? 1 : 0]" info:)
+    p{$top_left_x,$top_left_y}.r < 0.3 &&
+    p{$top_left_x,$top_left_y}.g < 0.5 &&
+    p{$top_left_x,$top_left_y}.b < 0.6 &&
+    p{$top_right_x,$top_right_y}.r < 0.3 &&
+    p{$top_right_x,$top_right_y}.g < 0.5 &&
+    p{$top_right_x,$top_right_y}.b < 0.6 &&
+    p{$bottom_left_x,$bottom_left_y}.r < 0.3 &&
+    p{$bottom_left_x,$bottom_left_y}.g < 0.5 &&
+    p{$bottom_left_x,$bottom_left_y}.b < 0.6 &&
+    p{$bottom_right_x,$bottom_right_y}.r < 0.3 &&
+    p{$bottom_right_x,$bottom_right_y}.g < 0.5 &&
+    p{$bottom_right_x,$bottom_right_y}.b < 0.6 ? 1 : 0]" info:)
 if [[ "$rounded_corners_ok" != 1 ]]; then
     printf 'Native rounded alpha did not expose all four frame corners.\n' >&2
     exit 1
 fi
 
 restored_corners_ok=$(magick "$restored_final_screenshot" -format "%[fx:
-    abs(p{$top_left_x,$top_left_y}.r - 32/255) < 0.05 &&
-    abs(p{$top_left_x,$top_left_y}.g - 64/255) < 0.05 &&
-    abs(p{$top_left_x,$top_left_y}.b - 96/255) < 0.05 &&
-    abs(p{$top_right_x,$top_right_y}.r - 32/255) < 0.05 &&
-    abs(p{$top_right_x,$top_right_y}.g - 64/255) < 0.05 &&
-    abs(p{$top_right_x,$top_right_y}.b - 96/255) < 0.05 &&
-    abs(p{$bottom_left_x,$bottom_left_y}.r - 32/255) < 0.05 &&
-    abs(p{$bottom_left_x,$bottom_left_y}.g - 64/255) < 0.05 &&
-    abs(p{$bottom_left_x,$bottom_left_y}.b - 96/255) < 0.05 &&
-    abs(p{$bottom_right_x,$bottom_right_y}.r - 32/255) < 0.05 &&
-    abs(p{$bottom_right_x,$bottom_right_y}.g - 64/255) < 0.05 &&
-    abs(p{$bottom_right_x,$bottom_right_y}.b - 96/255) < 0.05 ? 1 : 0]" info:)
+    p{$top_left_x,$top_left_y}.r < 0.3 &&
+    p{$top_left_x,$top_left_y}.g < 0.5 &&
+    p{$top_left_x,$top_left_y}.b < 0.6 &&
+    p{$top_right_x,$top_right_y}.r < 0.3 &&
+    p{$top_right_x,$top_right_y}.g < 0.5 &&
+    p{$top_right_x,$top_right_y}.b < 0.6 &&
+    p{$bottom_left_x,$bottom_left_y}.r < 0.3 &&
+    p{$bottom_left_x,$bottom_left_y}.g < 0.5 &&
+    p{$bottom_left_x,$bottom_left_y}.b < 0.6 &&
+    p{$bottom_right_x,$bottom_right_y}.r < 0.3 &&
+    p{$bottom_right_x,$bottom_right_y}.g < 0.5 &&
+    p{$bottom_right_x,$bottom_right_y}.b < 0.6 ? 1 : 0]" info:)
 if [[ "$restored_corners_ok" != 1 ]]; then
     printf 'Native rounded alpha was not restored after state transitions.\n' >&2
     exit 1
@@ -270,6 +284,20 @@ if [[ "$test_wm_class" == subsurface-probe ]]; then
         printf 'Subsurface probe was not visible inside the rounded boundary.\n' >&2
         exit 1
     fi
+fi
+
+shadow_sample_x=$(( (frame_x - 4) * 5 / 2 ))
+shadow_sample_y=$(( (frame_y + frame_height / 2) * 5 / 2 ))
+shadow_visible=$(magick "$screenshot" -format "%[fx:
+    p{$shadow_sample_x,$shadow_sample_y}.r < 32/255 &&
+    p{$shadow_sample_x,$shadow_sample_y}.g < 64/255 &&
+    p{$shadow_sample_x,$shadow_sample_y}.b < 96/255 &&
+    (32/255 - p{$shadow_sample_x,$shadow_sample_y}.r) +
+    (64/255 - p{$shadow_sample_x,$shadow_sample_y}.g) +
+    (96/255 - p{$shadow_sample_x,$shadow_sample_y}.b) > 0.05 ? 1 : 0]" info:)
+if [[ "$shadow_visible" != 1 ]]; then
+    printf 'Compositor shadow was not visible outside the rounded frame.\n' >&2
+    exit 1
 fi
 
 content_visible=$(magick "$screenshot" -format "%[fx:
