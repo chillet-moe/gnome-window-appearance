@@ -13,7 +13,7 @@
   `libmutter-18`，而不是系统 core library；
 - experimental feature 通过 `MUTTER_DEBUG_EXPERIMENTAL_FEATURES` 仅在测试
   会话启用，没有修改当前桌面的 GSettings；
-- logical monitor 成功进入 250% 缩放；
+- logical monitor 成功进入 200%、250% 和 300% 缩放；
 - 自定义 Wayland probe 的 frame 为 `760×457`，buffer 为 `812×509`，能够
   覆盖带客户端阴影的 `frameRect != bufferRect` 路径；
 - 测试扩展在几何同步后直接确认 Wayland surface container 的 native clip
@@ -30,6 +30,8 @@
   透明角下没有正文或客户端阴影泄漏；最大化和全屏时该阴影随外观路径关闭；
 - Overview 中 `MetaWindowActor` 存在 mapped clone，截图保持圆角与阴影；退出
   Overview 后 clone 被清理且原窗口外观保持；
+- 切换到临时工作区后原窗口 actor 正确变为 unmapped，返回原工作区后 actor
+  重新 mapped，native clip、圆角和阴影状态保持；测试结束时临时工作区被移除；
 - 默认 Xwayland 配置从干净源码完整编译 694 个目标；另以
   `-Dxwayland=false -Dtests=disabled` 完整编译 664 个目标，验证 Wayland 阴影
   不会隐式依赖 Xwayland 构建条件；
@@ -39,15 +41,17 @@
 
     ./scripts/test-mutter-patches.sh
     ./tests/run-mutter-nested.sh
+    ./packaging/fedora/test-scale-matrix.sh
 
 当前结果覆盖矩形裁切、原生圆角 alpha、compositor 阴影、最大化/全屏状态
-切换、Overview clone 和合成的 `wl_subsurface` 回归客户端。workspace 切换、
-真实 JetBrains Runtime subsurface 和 200%/300% 渲染矩阵仍待扩大覆盖。
+切换、Overview clone、工作区切换和合成的 `wl_subsurface` 回归客户端，并已在
+最终优化 RPM 上通过 200%、250% 和 300% 缩放矩阵。真实 JetBrains Runtime
+subsurface 仍待扩大覆盖。
 
 Fedora spec 以 `Patch9001` 至 `Patch9003` 通过 `%autosetup -S git` 严格应用，
 使用 Fedora release flags、LTO 与完整安装目标成功生成
 `mutter-50.4-1.gwa1.fc44` 的主包、已安装子包、测试/调试包和 SRPM。所有 RPM
 摘要通过，DNF `--assumeno` 确认为四个已安装子包的纯升级事务。最终主 RPM 中
-解包出的优化版 libmutter 再次通过上述嵌套渲染回归。四个原始
+解包出的优化版 libmutter 再次通过上述三倍率嵌套渲染回归。四个原始
 `50.4-1.fc44` 官方 RPM 已按精确 NEVRA 缓存并通过 Fedora 签名/摘要验证，供
 离线回滚使用；真实系统包替换仍需单独明确授权。

@@ -17,7 +17,7 @@
 - [x] 实现 `frameRect` 相对 `bufferRect` 的矩形 clip。
 - [x] 在主内容节点验证无整窗 FBO 的圆角 alpha mask。
 - [x] 实现独立统一阴影。
-- [ ] 覆盖移动、缩放、overview 和工作区切换（最大化、全屏已覆盖）。
+- [ ] 覆盖移动和交互式缩放（最大化、全屏、overview 和工作区切换已覆盖）。
 - [ ] 输出按 Shell 版本分类的兼容性与已知限制。
 
 退出条件：扩展方案在目标 GNOME 版本上可日常使用，或存在经过测试证明无法绕过的 API/渲染限制。
@@ -52,6 +52,8 @@
 ## 当前下一步
 
 Mutter 50.4 已完成原生矩形裁切、无整窗 FBO 的圆角 alpha 与 compositor
-统一阴影。250% 无头嵌套测试已覆盖真实 `wl_subsurface`、普通/最大化/全屏
-状态切换与 Overview clone；默认和无 Xwayland 构建均通过。下一步建立 Fedora
-SRPM patch 注入、可追溯 RPM 构建、安装检查与回滚流程。
+统一阴影。最终优化 RPM 的 200%/250%/300% 无头嵌套测试已覆盖合成的真实
+`wl_subsurface`、普通/最大化/全屏状态、Overview clone 和工作区切换；默认和
+无 Xwayland 构建均通过。Fedora SRPM 注入、可追溯 RPM 构建、离线回滚缓存和
+纯升级事务预检已完成；下一步需要在明确授权替换系统 compositor 后，验证真实
+安装、登出重登与回滚。

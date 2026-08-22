@@ -38,11 +38,14 @@
     ./packaging/fedora/build-rpms.sh
     ./packaging/fedora/verify-rpms.sh
     ./packaging/fedora/test-rpms.sh
+    ./packaging/fedora/test-scale-matrix.sh
 
 构建会生成主包、当前已安装的子包、测试/调试子包、SRPM，以及包含上游 SRPM、
 仓库 commit 和补丁/RPM SHA-256 的 `_build/fedora/build-metadata.txt`。
 `test-rpms.sh` 会直接从最终主 RPM 解包 release/LTO 优化后的 core libmutter，
 并用它运行与开发构建相同的 250% 嵌套渲染回归，不安装系统包。
+`test-scale-matrix.sh` 进一步对同一优化库依次运行 200%、250% 和 300% 回归，
+每个倍率的截图与日志保存在独立 artifact 目录。
 
 安装脚本只升级当前已经安装的 Mutter 子包。它会先把这些包的官方 RPM 下载到
 `_build/fedora/rollback/` 并保存精确版本清单，再从禁用仓库的本地事务安装，

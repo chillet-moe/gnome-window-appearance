@@ -5,6 +5,7 @@ repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 build_dir="$repo_dir/_build/mutter/build"
 library_dir=${TEST_MUTTER_LIBRARY_DIR:-$build_dir/src}
 runtime_dir="$repo_dir/_build/mutter/nested"
+artifact_dir=${GWA_TEST_ARTIFACT_DIR:-$repo_dir/tests/artifacts}
 uuid=gnome-window-appearance@chillet.moe
 wayland_display="gwayland-mutter-appearance-test-$$"
 
@@ -25,7 +26,7 @@ done
 
 "$repo_dir/scripts/build-extension.sh" >/dev/null
 mkdir -p "$runtime_dir/bin" "$runtime_dir/config" "$runtime_dir/data/gnome-shell/extensions"
-mkdir -p "$runtime_dir/cache" "$runtime_dir/state" "$repo_dir/tests/artifacts"
+mkdir -p "$runtime_dir/cache" "$runtime_dir/state" "$artifact_dir"
 
 read -r -a gtk_flags <<<"$(pkg-config --cflags --libs gtk+-3.0)"
 cc -O2 -Wall -Wextra \
@@ -60,11 +61,12 @@ export XDG_STATE_HOME="$runtime_dir/state"
 export GTK_A11Y=none
 export TEST_WAYLAND_DISPLAY="$wayland_display"
 export TEST_PROBE="$runtime_dir/bin/subsurface-probe"
-export TEST_ARTIFACT_DIR="$repo_dir/tests/artifacts"
+export TEST_ARTIFACT_DIR="$artifact_dir"
 export TEST_MUTTER_LIBRARY_DIR="$library_dir"
 export GWA_TEST_CAPTURE_ONLY=1
 export GWA_TEST_WM_CLASS=subsurface-probe
 export GWA_TEST_STATE_TRANSITIONS=1
+export GWA_TEST_SCALE=${GWA_TEST_SCALE:-2.5}
 export MUTTER_DEBUG_EXPERIMENTAL_FEATURES=window-appearance
 # GNOME Shell's installed typelibs are paired with the system Cogl, Clutter and
 # MTK libraries. Only override the ABI-compatible core libmutter containing the

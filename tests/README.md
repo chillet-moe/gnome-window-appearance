@@ -20,10 +20,18 @@
     ./tests/run-mutter-nested.sh
 
 嵌套测试通过环境变量启用 experimental feature，不更改当前桌面设置；它会
-确认 Shell 实际映射了构建目录中的 libmutter，在 250% 缩放下启动一个
+确认 Shell 实际映射了构建目录中的 libmutter，默认在 250% 缩放下启动一个
 `frameRect != bufferRect` 的 Wayland 客户端。该客户端用独立红色
 `wl_subsurface` 覆盖左上角；测试同时验证客户端阴影被清除、四角圆角 alpha、
 subsurface 在圆角内部仍可见、compositor 阴影在 frame 外可见，以及窗口正文
 没有被错误地整体裁掉。随后测试最大化、恢复、全屏、再次恢复，验证方角禁用
 路径与圆角恢复路径；最后进入并退出 Overview，确认 clone 继承圆角和阴影且
-退出后被正确清理。
+退出后被正确清理。测试还会切换到临时工作区并返回，确认原窗口 actor 的映射
+生命周期和原生外观状态正确恢复。
+
+验证最终优化 RPM 的 200%、250% 和 300% 缩放矩阵：
+
+    ./packaging/fedora/test-scale-matrix.sh
+
+也可以用 `GWA_TEST_SCALE` 单独选择嵌套测试倍率，用
+`GWA_TEST_ARTIFACT_DIR` 隔离截图和日志。

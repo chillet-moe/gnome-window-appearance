@@ -3,18 +3,23 @@ set -euo pipefail
 
 uuid=gnome-window-appearance@chillet.moe
 test_wm_class=${GWA_TEST_WM_CLASS:-window-probe}
+test_scale=${GWA_TEST_SCALE:-2.5}
+test_percent=$(awk -v scale="$test_scale" 'BEGIN { printf "%d", scale * 100 }')
 shell_log="$TEST_ARTIFACT_DIR/mutter-native-shell.log"
-screenshot="$TEST_ARTIFACT_DIR/fractional-2.5.png"
+screenshot="$TEST_ARTIFACT_DIR/fractional-$test_scale.png"
 maximized_screenshot="$TEST_ARTIFACT_DIR/mutter-native-maximized.png"
 restored_screenshot="$TEST_ARTIFACT_DIR/mutter-native-restored.png"
 fullscreen_screenshot="$TEST_ARTIFACT_DIR/mutter-native-fullscreen.png"
 restored_final_screenshot="$TEST_ARTIFACT_DIR/mutter-native-restored-final.png"
 overview_screenshot="$TEST_ARTIFACT_DIR/mutter-native-overview.png"
 overview_restored_screenshot="$TEST_ARTIFACT_DIR/mutter-native-overview-restored.png"
+workspace_away_screenshot="$TEST_ARTIFACT_DIR/mutter-native-workspace-away.png"
+workspace_returned_screenshot="$TEST_ARTIFACT_DIR/mutter-native-workspace-returned.png"
 display_config="$TEST_ARTIFACT_DIR/mutter-native-display-config.txt"
 rm -f "$screenshot" "$maximized_screenshot" "$restored_screenshot" \
     "$fullscreen_screenshot" "$restored_final_screenshot" \
-    "$overview_screenshot" "$overview_restored_screenshot"
+    "$overview_screenshot" "$overview_restored_screenshot" \
+    "$workspace_away_screenshot" "$workspace_returned_screenshot"
 
 gsettings set org.gnome.shell enabled-extensions "['$uuid']"
 gsettings set org.gnome.shell disable-user-extensions false
@@ -25,7 +30,7 @@ gsettings set org.gnome.desktop.background primary-color '#204060'
 gnome-shell \
     --wayland \
     --headless \
-    --virtual-monitor=3200x1800 \
+    --virtual-monitor=3600x1800 \
     --no-x11 \
     --wayland-display="$TEST_WAYLAND_DISPLAY" \
     --force-animations \
@@ -65,11 +70,11 @@ gdctl set \
     --layout-mode logical \
     --logical-monitor \
     --primary \
-    --scale 2.5 \
+    --scale "$test_scale" \
     --monitor Meta-0
 gdctl show >"$display_config"
-if ! rg -q 'Scale: 2\.5' "$display_config"; then
-    printf 'Nested monitor did not enter 250%% scale.\n' >&2
+if ! rg -Fq "Scale: $test_scale" "$display_config"; then
+    printf 'Nested monitor did not enter %s%% scale.\n' "$test_percent" >&2
     exit 1
 fi
 
@@ -80,7 +85,7 @@ probe_pid=$!
 
 for _ in $(seq 1 120); do
     if [[ -s "$screenshot" ]] &&
-       [[ -s "$overview_restored_screenshot" ]] &&
+       [[ -s "$workspace_returned_screenshot" ]] &&
        rg -q "\[gnome-window-appearance\] capture-only $test_wm_class " "$shell_log"; then
         break
     fi
@@ -94,7 +99,8 @@ if [[ ! -s "$screenshot" ]]; then
 fi
 if [[ ! -s "$maximized_screenshot" || ! -s "$restored_screenshot" ||
       ! -s "$fullscreen_screenshot" || ! -s "$restored_final_screenshot" ||
-      ! -s "$overview_screenshot" || ! -s "$overview_restored_screenshot" ]]; then
+      ! -s "$overview_screenshot" || ! -s "$overview_restored_screenshot" ||
+      ! -s "$workspace_away_screenshot" || ! -s "$workspace_returned_screenshot" ]]; then
     printf 'Patched nested Shell did not complete state-transition captures.\n' >&2
     tail -n 120 "$shell_log" >&2
     exit 1
@@ -121,6 +127,21 @@ if ! rg -q '\[gnome-window-appearance\] state=overview-restored native-clip=true
     printf 'Window did not leave the overview clone state cleanly.\n' >&2
     exit 1
 fi
+if ! rg -q '\[gnome-window-appearance\] state=workspace-away native-clip=true .*actor-mapped=false' \
+    "$shell_log"; then
+    printf 'Window actor did not leave the mapped workspace cleanly.\n' >&2
+    exit 1
+fi
+if ! rg -q '\[gnome-window-appearance\] state=workspace-returned native-clip=true .*actor-mapped=true' \
+    "$shell_log"; then
+    printf 'Window actor did not restore its native appearance after workspace return.\n' >&2
+    exit 1
+fi
+
+scale_coordinate() {
+    awk -v value="$1" -v scale="$test_scale" \
+        'BEGIN { printf "%d", value * scale + 0.5 }'
+}
 
 for state_capture in \
     "maximized:$maximized_screenshot" \
@@ -134,8 +155,8 @@ for state_capture in \
             's/.*frame=[0-9]+x[0-9]+\+([0-9]+)\+([0-9]+).*/\1 \2/' \
             <<<"$state_line"
     )
-    state_sample_x=$(( (state_x + 2) * 5 / 2 ))
-    state_sample_y=$(( (state_y + 2) * 5 / 2 ))
+    state_sample_x=$(scale_coordinate "$((state_x + 2))")
+    state_sample_y=$(scale_coordinate "$((state_y + 2))")
     square_corner_visible=$(magick "$state_screenshot" -format "%[fx:
         p{$state_sample_x,$state_sample_y}.r > 0.9 &&
         p{$state_sample_x,$state_sample_y}.g < 0.1 &&
@@ -166,6 +187,7 @@ read -r sample_x sample_y extent < <(
         -v fw="$frame_width" -v fh="$frame_height" \
         -v bx="$buffer_x" -v by="$buffer_y" \
         -v bw="$buffer_width" -v bh="$buffer_height" \
+        -v scale="$test_scale" \
         'BEGIN {
             left = fx - bx
             top = fy - by
@@ -189,7 +211,7 @@ read -r sample_x sample_y extent < <(
                 x = fx + fw / 2
                 y = fy + fh + bottom / 2
             }
-            printf "%d %d %d\n", int(x * 2.5 + 0.5), int(y * 2.5 + 0.5), extent
+            printf "%d %d %d\n", int(x * scale + 0.5), int(y * scale + 0.5), extent
         }'
 )
 if (( extent < 2 )); then
@@ -211,7 +233,7 @@ if [[ "$background_ok" != 1 ]]; then
 fi
 
 # Sample two logical pixels inside each frame corner. A 16px logical native
-# radius at 250% scale must expose the background there, while the center must
+# radius at the requested scale must expose the background there, while the center must
 # remain client content. The latter prevents an all-transparent shader failure
 # from masquerading as a successful clip.
 read -r top_left_x top_left_y top_right_x top_right_y \
@@ -220,8 +242,8 @@ read -r top_left_x top_left_y top_right_x top_right_y \
     awk \
         -v fx="$frame_x" -v fy="$frame_y" \
         -v fw="$frame_width" -v fh="$frame_height" \
+        -v scale="$test_scale" \
         'BEGIN {
-            scale = 2.5
             inset = 2
             printf "%d %d %d %d %d %d %d %d %d %d\n", \
                 int((fx + inset) * scale + 0.5), \
@@ -274,8 +296,8 @@ if [[ "$restored_corners_ok" != 1 ]]; then
 fi
 
 if [[ "$test_wm_class" == subsurface-probe ]]; then
-    subsurface_x=$(( (frame_x + 16) * 5 / 2 ))
-    subsurface_y=$(( (frame_y + 2) * 5 / 2 ))
+    subsurface_x=$(scale_coordinate "$((frame_x + 16))")
+    subsurface_y=$(scale_coordinate "$((frame_y + 2))")
     subsurface_visible=$(magick "$screenshot" -format "%[fx:
         p{$subsurface_x,$subsurface_y}.r > 0.9 &&
         p{$subsurface_x,$subsurface_y}.g < 0.1 &&
@@ -286,8 +308,8 @@ if [[ "$test_wm_class" == subsurface-probe ]]; then
     fi
 fi
 
-shadow_sample_x=$(( (frame_x - 4) * 5 / 2 ))
-shadow_sample_y=$(( (frame_y + frame_height / 2) * 5 / 2 ))
+shadow_sample_x=$(scale_coordinate "$((frame_x - 4))")
+shadow_sample_y=$(scale_coordinate "$((frame_y + frame_height / 2))")
 shadow_visible=$(magick "$screenshot" -format "%[fx:
     p{$shadow_sample_x,$shadow_sample_y}.r < 32/255 &&
     p{$shadow_sample_x,$shadow_sample_y}.g < 64/255 &&
@@ -315,5 +337,5 @@ if rg -q 'JS ERROR|segmentation fault|assertion.*failed' "$shell_log"; then
     exit 1
 fi
 
-printf 'Patched Mutter 250%% nested test passed. Log: %s Screenshot: %s\n' \
-    "$shell_log" "$screenshot"
+printf 'Patched Mutter %s%% nested test passed. Log: %s Screenshot: %s\n' \
+    "$test_percent" "$shell_log" "$screenshot"

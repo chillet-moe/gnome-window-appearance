@@ -121,7 +121,8 @@ export class WindowAppearanceManager {
                 );
                 scheduleTestCapture(window, () =>
                     contentActor?.get_parent()?.has_clip ?? false,
-                () => actor.has_mapped_clones());
+                () => actor.has_mapped_clones(),
+                () => actor.is_mapped());
                 return GLib.SOURCE_REMOVE;
             });
             return;
