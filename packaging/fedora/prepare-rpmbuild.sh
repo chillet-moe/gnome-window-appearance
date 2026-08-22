@@ -6,7 +6,8 @@ work_dir="$repo_dir/_build/fedora"
 top_dir="$work_dir/rpmbuild"
 input_dir="$work_dir/input"
 srpm_path=${1:-}
-release_tag=${GWA_RPM_RELEASE_TAG:-gwa1}
+release_tag=${GWA_RPM_RELEASE_TAG:-gwa2}
+gnome_shell_evr=$(rpm -q --qf '%{EVR}' gnome-shell)
 
 if [[ ! "$release_tag" =~ ^[A-Za-z0-9]+$ ]]; then
     printf 'GWA_RPM_RELEASE_TAG must be alphanumeric: %s\n' "$release_tag" >&2
@@ -60,9 +61,14 @@ done
 
 sed -i -E "s/^Release:[[:space:]].*/Release:       %autorelease -e ${release_tag}/" \
     "$top_dir/SPECS/mutter.spec"
+sed -i \
+    "0,/^Requires:/s//Requires: gnome-shell%{?_isa} = ${gnome_shell_evr}\\n&/" \
+    "$top_dir/SPECS/mutter.spec"
 
 if ! rg -q '^Patch9001:' "$top_dir/SPECS/mutter.spec" ||
-   ! rg -q "^Release:.*${release_tag}" "$top_dir/SPECS/mutter.spec"; then
+   ! rg -q "^Release:.*${release_tag}" "$top_dir/SPECS/mutter.spec" ||
+   ! rg -Fq "Requires: gnome-shell%{?_isa} = ${gnome_shell_evr}" \
+       "$top_dir/SPECS/mutter.spec"; then
     printf 'Failed to inject the local patch stack into the Mutter spec.\n' >&2
     exit 1
 fi

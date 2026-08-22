@@ -7,6 +7,7 @@ rollback_dir="$work_dir/rollback"
 dnf_log_dir="$work_dir/dnf-log"
 manifest="$rollback_dir/installed-before.txt"
 features_manifest="$rollback_dir/experimental-features-before.txt"
+shell_manifest="$rollback_dir/gnome-shell-before.txt"
 rollback_rpms=()
 
 if [[ ! -s "$manifest" ]]; then
@@ -16,6 +17,21 @@ fi
 if [[ ! -s "$features_manifest" ]]; then
     printf 'Rollback feature manifest does not exist: %s\n' \
         "$features_manifest" >&2
+    exit 1
+fi
+if [[ ! -s "$shell_manifest" ]]; then
+    printf 'Rollback GNOME Shell manifest does not exist: %s\n' \
+        "$shell_manifest" >&2
+    exit 1
+fi
+
+cached_shell=$(<"$shell_manifest")
+current_shell=$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' \
+    gnome-shell)
+if [[ "$current_shell" != "$cached_shell" ]]; then
+    printf 'Refusing an offline rollback across a GNOME Shell update.\n' >&2
+    printf 'Cached:  %s\nCurrent: %s\n' "$cached_shell" "$current_shell" >&2
+    printf 'Run packaging/fedora/recover-official.sh to synchronize the current official stack.\n' >&2
     exit 1
 fi
 

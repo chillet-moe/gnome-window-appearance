@@ -54,4 +54,14 @@ Fedora spec 以 `Patch9001` 至 `Patch9003` 通过 `%autosetup -S git` 严格应
 摘要通过，DNF `--assumeno` 确认为四个已安装子包的纯升级事务。最终主 RPM 中
 解包出的优化版 libmutter 再次通过上述三倍率嵌套渲染回归。四个原始
 `50.4-1.fc44` 官方 RPM 已按精确 NEVRA 缓存并通过 Fedora 签名/摘要验证，供
-离线回滚使用；真实系统包替换仍需单独明确授权。
+离线回滚使用。真实系统安装、登出重登和离线回滚往返均已通过；新 Shell 进程的
+`/proc/<pid>/maps` 显示加载当前落盘 patched libmutter inode，用户确认真实桌面
+圆角与阴影视觉效果。回滚测试发现并修复了 feature 列表恢复不精确的问题，现改为
+安装前完整快照与原样恢复。宿主视觉效果由用户确认，自动像素判断继续限定在隔离
+nested 环境。
+
+`gwa2` 产物增加 `gnome-shell(x86-64) = 50.4-1.fc44` 精确运行时依赖，并记录
+GNOME Shell 完整 NEVRA baseline。重新完成 release/LTO RPM 构建和
+200%/250%/300% nested 回归后，宿主从 `gwa1` 纯升级到 `gwa2`。联网
+`dnf5 distro-sync --assumeno` 恢复预演正确规划将四个本地 Mutter 子包同步回
+Fedora 官方 `50.4-1.fc44`，未修改系统。

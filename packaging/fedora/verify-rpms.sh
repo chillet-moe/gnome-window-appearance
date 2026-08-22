@@ -3,7 +3,8 @@ set -euo pipefail
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 rpm_dir="$repo_dir/_build/fedora/rpmbuild/RPMS"
-expected_release=${GWA_RPM_RELEASE_TAG:-gwa1}
+expected_release=${GWA_RPM_RELEASE_TAG:-gwa2}
+expected_shell_evr=$(rpm -q --qf '%{EVR}' gnome-shell)
 found_main=false
 
 while IFS= read -r -d '' rpm_path; do
@@ -16,6 +17,12 @@ while IFS= read -r -d '' rpm_path; do
     fi
     if [[ $(rpm -qp --qf '%{NAME}' "$rpm_path") == mutter ]]; then
         found_main=true
+        if ! rpm -qp --requires "$rpm_path" |
+             rg -q "^gnome-shell(\\([^)]*\\))? = ${expected_shell_evr}$"; then
+            printf 'Main Mutter RPM does not require the exact GNOME Shell EVR %s.\n' \
+                "$expected_shell_evr" >&2
+            exit 1
+        fi
     fi
 done < <(find "$rpm_dir" -type f -name '*.rpm' -print0 | sort -z)
 

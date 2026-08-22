@@ -13,12 +13,15 @@ source_nevra=$(rpm -qp --qf '%{NAME}-%{VERSION}-%{RELEASE}.src\n' \
     "$top_dir"/SRPMS/mutter-*.src.rpm)
 upstream_source_rpm=$(<"$work_dir/upstream-source-rpm.txt")
 installed_nevra=$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' mutter)
+gnome_shell_nevra=$(rpm -q --qf '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' \
+    gnome-shell)
 repo_commit=$(git -C "$repo_dir" rev-parse HEAD)
 
 {
     printf 'source_rpm=%s\n' "$source_nevra"
     printf 'upstream_source_rpm=%s\n' "$upstream_source_rpm"
     printf 'installed_baseline=%s\n' "$installed_nevra"
+    printf 'gnome_shell_baseline=%s\n' "$gnome_shell_nevra"
     printf 'repository_commit=%s\n' "$repo_commit"
     printf 'fedora=%s\n' "$(rpm -E '%{fedora}')"
     printf 'built_at=%s\n' "$(date --iso-8601=seconds)"

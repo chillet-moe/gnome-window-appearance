@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-expected_release=${GWA_RPM_RELEASE_TAG:-gwa1}
+expected_release=${GWA_RPM_RELEASE_TAG:-gwa2}
 library=/usr/lib64/libmutter-18.so.0.0.0
+repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+
+"$repo_dir/packaging/fedora/verify-build-baseline.sh"
 
 for package in mutter mutter-common mutter-devel mutter-devkit; do
     release=$(rpm -q --qf '%{RELEASE}' "$package")
@@ -47,7 +50,8 @@ if [[ "$mapped_inode" != "$installed_inode" ]]; then
 fi
 
 shell_log=$(journalctl --user -b "_PID=$shell_pid" --no-pager)
-if rg -qi 'segmentation fault|assertion.*failed|failed to create backend' \
+if rg -qi \
+    'segmentation fault|failed to create backend|(mutter|meta|clutter|cogl).*assertion.*failed' \
     <<<"$shell_log"; then
     printf 'GNOME Shell startup log contains a fatal error.\n' >&2
     exit 1

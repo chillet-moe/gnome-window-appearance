@@ -21,20 +21,29 @@ if [[ -z "$latest_source_rpm" ]]; then
 fi
 
 current_source_rpm=''
+current_gnome_shell=''
 if [[ -f "$metadata_path" ]]; then
     current_source_rpm=$(sed -n 's/^upstream_source_rpm=//p' "$metadata_path")
+    current_gnome_shell=$(sed -n 's/^gnome_shell_baseline=//p' "$metadata_path")
 fi
 if [[ -z "$current_source_rpm" ]]; then
     current_source_rpm=$(rpm -q --qf '%{SOURCERPM}\n' mutter)
 fi
 
-if [[ "$latest_source_rpm" == "$current_source_rpm" ]]; then
-    printf 'No Mutter source update: %s\n' "$current_source_rpm"
+installed_gnome_shell=$(rpm -q --qf \
+    '%{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' gnome-shell)
+if [[ "$latest_source_rpm" == "$current_source_rpm" &&
+      "$installed_gnome_shell" == "$current_gnome_shell" ]]; then
+    printf 'No Mutter or GNOME Shell baseline update: %s / %s\n' \
+        "$current_source_rpm" "$current_gnome_shell"
     exit 0
 fi
 
-printf 'Rebuilding for Mutter update: %s -> %s\n' \
-    "$current_source_rpm" "$latest_source_rpm"
+printf 'Rebuilding for desktop stack update:\n'
+printf '  Mutter source: %s -> %s\n' \
+    "${current_source_rpm:-unknown}" "$latest_source_rpm"
+printf '  GNOME Shell:   %s -> %s\n' \
+    "${current_gnome_shell:-unknown}" "$installed_gnome_shell"
 rm -f "$update_dir/$latest_source_rpm"
 dnf5 --setopt="cachedir=$dnf_cache_dir" --setopt="logdir=$dnf_log_dir" \
     download --source --destdir="$update_dir" "${latest_source_rpm%.src.rpm}"
@@ -44,5 +53,6 @@ srpm_path="$update_dir/$latest_source_rpm"
 "$repo_dir/tests/run-mutter-nested.sh"
 "$repo_dir/packaging/fedora/build-rpms.sh" "$srpm_path"
 "$repo_dir/packaging/fedora/verify-rpms.sh"
+"$repo_dir/packaging/fedora/test-scale-matrix.sh"
 
 printf 'Update rebuilt and tested; it was not installed automatically.\n'

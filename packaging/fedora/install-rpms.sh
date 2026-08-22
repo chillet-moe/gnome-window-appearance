@@ -10,6 +10,7 @@ manifest="$rollback_dir/installed-before.txt"
 local_rpms=()
 
 "$repo_dir/packaging/fedora/verify-rpms.sh"
+"$repo_dir/packaging/fedora/verify-build-baseline.sh"
 "$repo_dir/packaging/fedora/cache-rollback.sh"
 
 while read -r name _; do
