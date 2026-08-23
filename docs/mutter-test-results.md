@@ -1,5 +1,25 @@
 # Mutter 补丁测试记录
 
+## 2026-08-23：Wayland resize picking 修复
+
+确认原 surface-container `clutter_actor_set_clip()` 会同时进入 Clutter paint 与
+pick 路径，导致 `frameRect` 外的 CSD 透明 resize 热区无法收到 pointer 事件；
+边缘拖动失效而 `Alt+F8` 仍正常，进一步排除了窗口 resize capability 和约束路径。
+
+第四个补丁把矩形裁切改为 `MetaSurfaceContainerActorWayland::paint` 调用期间的
+framebuffer clip，不再设置持久 actor clip。修复后：
+
+- 四个补丁从干净 `mutter-50.4-1.fc44.src.rpm` 依次应用并完整编译
+  `libmutter-18.so.0.0.0`；
+- 250% 无头嵌套 GNOME Shell 回归通过；
+- 运行时确认 surface container 的 `has_clip` 在普通、最大化、恢复、全屏、
+  Overview clone 和工作区切换路径中始终为 false；
+- frame 外、buffer 内的像素仍为固定背景，证明 paint-only clip 继续清除客户端
+  阴影；圆角、subsurface 和 compositor 阴影像素检查均通过。
+
+这组自动测试覆盖导致回归的 actor-clip 条件和原有视觉结果；真实桌面的边、角
+拖动仍应在安装新 RPM 后进行最终确认。
+
 ## 2026-08-22：Fedora 44 / Mutter 50.4
 
 测试基线来自当前系统精确匹配的 `mutter-50.4-1.fc44.src.rpm`。补丁通过

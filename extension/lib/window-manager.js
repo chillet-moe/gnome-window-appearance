@@ -107,7 +107,7 @@ export class WindowAppearanceManager {
                     return null;
                 };
                 const contentActor = findContentActor(actor);
-                const nativeClip = contentActor?.get_parent()?.has_clip ?? false;
+                const actorClip = contentActor?.get_parent()?.has_clip ?? false;
                 const frame = window.get_frame_rect();
                 const buffer = window.get_buffer_rect();
                 console.log(
@@ -117,7 +117,7 @@ export class WindowAppearanceManager {
                     '+' + frame.x + '+' + frame.y + ' ' +
                     'buffer=' + buffer.width + 'x' + buffer.height +
                     '+' + buffer.x + '+' + buffer.y + ' ' +
-                    'native-clip=' + nativeClip,
+                    'actor-clip=' + actorClip,
                 );
                 scheduleTestCapture(window, () =>
                     contentActor?.get_parent()?.has_clip ?? false,

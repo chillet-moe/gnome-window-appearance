@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: GNOME Window Appearance <gnome-window-appearance@chillet.moe>
+Date: Sun, 23 Aug 2026 00:00:00 +0800
+Subject: [PATCH] compositor: Preserve input outside Wayland window geometry
+
+Clutter actor clips affect picking as well as painting. Applying the window
+geometry clip directly to the Wayland surface container therefore prevents
+clients from receiving pointer events in resize margins outside their declared
+window geometry, even though compositor-initiated resizing still works.
+
+Keep the clip as private surface-container paint state and push it only around
+the parent paint implementation. This still removes client-side shadows from
+the rendered surface tree without changing the Wayland surface input regions
+or their Clutter picking bounds.
+
+Target: Mutter 50.4
+Depends-on: 0003-compositor-shadow-wayland-surface-trees.patch
+Tested-by: scripts/test-mutter-patches.sh
+Tested-by: tests/run-mutter-nested.sh
+---
+ src/compositor/meta-window-actor-wayland.c | 58 +++++++++++++++++++----
+ 1 file changed, 51 insertions(+), 7 deletions(-)
+
+diff --git a/src/compositor/meta-window-actor-wayland.c b/src/compositor/meta-window-actor-wayland.c
+--- a/src/compositor/meta-window-actor-wayland.c
++++ b/src/compositor/meta-window-actor-wayland.c
+@@ -42,6 +42,8 @@ struct _MetaSurfaceContainerActorWayland
+   ClutterActor parent;
+ 
+   MetaWindowActor *window_actor;
++  graphene_rect_t appearance_clip;
++  gboolean has_appearance_clip;
+ };
+ 
+ static void surface_container_cullable_iface_init (MetaCullableInterface *iface);
+@@ -151,6 +153,33 @@ surface_container_apply_transform (ClutterActor      *actor,
+     }
+ }
+ 
++static void
++surface_container_paint (ClutterActor        *actor,
++                         ClutterPaintContext *paint_context)
++{
++  MetaSurfaceContainerActorWayland *self =
++    META_SURFACE_CONTAINER_ACTOR_WAYLAND (actor);
++  ClutterActorClass *parent_class =
++    CLUTTER_ACTOR_CLASS (meta_surface_container_actor_wayland_parent_class);
++  CoglFramebuffer *framebuffer;
++
++  if (!self->has_appearance_clip)
++    {
++      parent_class->paint (actor, paint_context);
++      return;
++    }
++
++  framebuffer = clutter_paint_context_get_framebuffer (paint_context);
++  cogl_framebuffer_push_rectangle_clip (
++    framebuffer,
++    self->appearance_clip.origin.x,
++    self->appearance_clip.origin.y,
++    self->appearance_clip.origin.x + self->appearance_clip.size.width,
++    self->appearance_clip.origin.y + self->appearance_clip.size.height);
++  parent_class->paint (actor, paint_context);
++  cogl_framebuffer_pop_clip (framebuffer);
++}
++
+ static void
+ surface_container_dispose (GObject *object)
+ {
+@@ -164,7 +191,8 @@ meta_surface_container_actor_wayland_class_init (MetaSurfaceContainerActorWayla
+   ClutterActorClass *actor_class = CLUTTER_ACTOR_CLASS (klass);
+   GObjectClass *object_class = G_OBJECT_CLASS (klass);
+ 
+   actor_class->apply_transform = surface_container_apply_transform;
++  actor_class->paint = surface_container_paint;
+ 
+   object_class->dispose = surface_container_dispose;
+ }
+@@ -737,14 +765,33 @@ ensure_window_shadow (MetaWindowActorWayland *self,
+   return *shadow;
+ }
+ 
++static void
++surface_container_set_appearance_clip (
++  MetaSurfaceContainerActorWayland *surface_container,
++  const graphene_rect_t            *clip)
++{
++  ClutterActor *actor = CLUTTER_ACTOR (surface_container);
++
++  if ((!clip && !surface_container->has_appearance_clip) ||
++      (clip && surface_container->has_appearance_clip &&
++       graphene_rect_equal (&surface_container->appearance_clip, clip)))
++    return;
++
++  surface_container->has_appearance_clip = clip != NULL;
++  if (clip)
++    surface_container->appearance_clip = *clip;
++
++  clutter_actor_queue_redraw (actor);
++}
++
+ static void
+ disable_window_appearance (MetaWindowActorWayland *self)
+ {
+   ClutterActor *surface_container = CLUTTER_ACTOR (self->surface_container);
+   ClutterActor *child;
+   ClutterActorIter iter;
+ 
+-  clutter_actor_remove_clip (surface_container);
++  surface_container_set_appearance_clip (self->surface_container, NULL);
+   clear_window_shadows (self);
+   g_clear_pointer (&self->shadow_shape, meta_window_shape_unref);
+   g_clear_pointer (&self->rounded_frame_region, mtk_region_unref);
+@@ -781,17 +828,13 @@ sync_surface_tree_clip (MetaWindowActorWayland *self)
+   meta_window_get_buffer_rect (window, &buffer_rect);
+   geometry_scale = meta_window_actor_get_geometry_scale (window_actor);
+ 
+-  clutter_actor_set_clip (surface_container,
+-                          (frame_rect.x - buffer_rect.x) / (float) geometry_scale,
+-                          (frame_rect.y - buffer_rect.y) / (float) geometry_scale,
+-                          frame_rect.width / (float) geometry_scale,
+-                          frame_rect.height / (float) geometry_scale);
+-
+   rounded_bounds = GRAPHENE_RECT_INIT (
+     (frame_rect.x - buffer_rect.x) / (float) geometry_scale,
+     (frame_rect.y - buffer_rect.y) / (float) geometry_scale,
+     frame_rect.width / (float) geometry_scale,
+     frame_rect.height / (float) geometry_scale);
++  surface_container_set_appearance_clip (self->surface_container,
++                                         &rounded_bounds);
+   sync_shadow_geometry (
+     self,
+     &MTK_RECTANGLE_INIT ((int) roundf (rounded_bounds.origin.x),
+-- 
+2.55.0

@@ -107,32 +107,32 @@ if [[ ! -s "$maximized_screenshot" || ! -s "$restored_screenshot" ||
 fi
 
 for expected_state in \
-    'state=maximized native-clip=false' \
-    'state=restored native-clip=true' \
-    'state=fullscreen native-clip=false' \
-    'state=restored-final native-clip=true'; do
+    'state=maximized actor-clip=false' \
+    'state=restored actor-clip=false' \
+    'state=fullscreen actor-clip=false' \
+    'state=restored-final actor-clip=false'; do
     if ! rg -q "\[gnome-window-appearance\] $expected_state" "$shell_log"; then
-        printf 'Native clip state transition was not observed: %s\n' \
+        printf 'Unexpected input-affecting actor clip state: %s\n' \
             "$expected_state" >&2
         exit 1
     fi
 done
-if ! rg -q '\[gnome-window-appearance\] state=overview native-clip=true mapped-clones=true' \
+if ! rg -q '\[gnome-window-appearance\] state=overview actor-clip=false mapped-clones=true' \
     "$shell_log"; then
     printf 'Overview did not map a clone of the natively rendered window.\n' >&2
     exit 1
 fi
-if ! rg -q '\[gnome-window-appearance\] state=overview-restored native-clip=true mapped-clones=false' \
+if ! rg -q '\[gnome-window-appearance\] state=overview-restored actor-clip=false mapped-clones=false' \
     "$shell_log"; then
     printf 'Window did not leave the overview clone state cleanly.\n' >&2
     exit 1
 fi
-if ! rg -q '\[gnome-window-appearance\] state=workspace-away native-clip=true .*actor-mapped=false' \
+if ! rg -q '\[gnome-window-appearance\] state=workspace-away actor-clip=false .*actor-mapped=false' \
     "$shell_log"; then
     printf 'Window actor did not leave the mapped workspace cleanly.\n' >&2
     exit 1
 fi
-if ! rg -q '\[gnome-window-appearance\] state=workspace-returned native-clip=true .*actor-mapped=true' \
+if ! rg -q '\[gnome-window-appearance\] state=workspace-returned actor-clip=false .*actor-mapped=true' \
     "$shell_log"; then
     printf 'Window actor did not restore its native appearance after workspace return.\n' >&2
     exit 1
@@ -169,8 +169,8 @@ done
 
 geometry_line=$(rg "\[gnome-window-appearance\] capture-only $test_wm_class " \
     "$shell_log" | tail -n 1)
-if [[ "$geometry_line" != *'native-clip=true'* ]]; then
-    printf 'Wayland surface container did not receive the native clip: %s\n' \
+if [[ "$geometry_line" != *'actor-clip=false'* ]]; then
+    printf 'Wayland surface container retained an input-affecting actor clip: %s\n' \
         "$geometry_line" >&2
     exit 1
 fi

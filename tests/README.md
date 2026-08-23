@@ -24,7 +24,9 @@
 `frameRect != bufferRect` 的 Wayland 客户端。该客户端用独立红色
 `wl_subsurface` 覆盖左上角；测试同时验证客户端阴影被清除、四角圆角 alpha、
 subsurface 在圆角内部仍可见、compositor 阴影在 frame 外可见，以及窗口正文
-没有被错误地整体裁掉。随后测试最大化、恢复、全屏、再次恢复，验证方角禁用
+没有被错误地整体裁掉。测试还确认 surface container 没有持久 actor clip，避免
+绘制裁切同时限制 Wayland picking 和 CSD resize 热区。随后测试最大化、恢复、
+全屏、再次恢复，验证方角禁用
 路径与圆角恢复路径；最后进入并退出 Overview，确认 clone 继承圆角和阴影且
 退出后被正确清理。测试还会切换到临时工作区并返回，确认原窗口 actor 的映射
 生命周期和原生外观状态正确恢复。

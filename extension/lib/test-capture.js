@@ -38,7 +38,7 @@ function captureScreenshot(artifactDir, filename, onComplete = null) {
     });
 }
 
-function scheduleStateTransitions(window, artifactDir, getNativeClip,
+function scheduleStateTransitions(window, artifactDir, getActorClip,
                                   getHasMappedClones, getActorMapped) {
     const workspaceManager = global.workspace_manager;
     const originalWorkspace = window.get_workspace();
@@ -74,7 +74,7 @@ function scheduleStateTransitions(window, artifactDir, getNativeClip,
             const frame = window.get_frame_rect();
             console.log(
                 `[gnome-window-appearance] state=${name} ` +
-                `native-clip=${getNativeClip?.() ?? false} ` +
+                `actor-clip=${getActorClip?.() ?? false} ` +
                 `mapped-clones=${getHasMappedClones?.() ?? false} ` +
                 `actor-mapped=${getActorMapped?.() ?? false} ` +
                 `frame=${frame.width}x${frame.height}+${frame.x}+${frame.y}`,
@@ -87,7 +87,7 @@ function scheduleStateTransitions(window, artifactDir, getNativeClip,
     advance(0);
 }
 
-export function scheduleTestCapture(window, getNativeClip = null,
+export function scheduleTestCapture(window, getActorClip = null,
                                     getHasMappedClones = null,
                                     getActorMapped = null) {
     const artifactDir = GLib.getenv('TEST_ARTIFACT_DIR');
@@ -102,7 +102,7 @@ export function scheduleTestCapture(window, getNativeClip = null,
         const scale = GLib.getenv('GWA_TEST_SCALE') ?? '2.5';
         captureScreenshot(artifactDir, `fractional-${scale}.png`, success => {
             if (success && GLib.getenv('GWA_TEST_STATE_TRANSITIONS') === '1')
-                scheduleStateTransitions(window, artifactDir, getNativeClip,
+                scheduleStateTransitions(window, artifactDir, getActorClip,
                                          getHasMappedClones, getActorMapped);
         });
         return GLib.SOURCE_REMOVE;

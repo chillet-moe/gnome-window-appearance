@@ -31,6 +31,11 @@ Fedora spec 或构建环境修改属于 `packaging/fedora/`，不应混入功能
      window actor 的动画和 clone 一起变换。
    - 将实际与 X11 无关的 shadow factory/window shape 源文件改为始终构建，
      已验证 `-Dxwayland=false` 配置。
+4. `0004-compositor-preserve-wayland-surface-input.patch`
+   - 将 surface tree 的矩形裁切从持久的 Clutter actor clip 改为仅在 paint
+     调用期间生效的 framebuffer clip，避免裁切同时限制 actor picking。
+   - 保留客户端在 `frameRect` 外声明的输入区域，使 CSD 透明边框仍能发起
+     `xdg_toplevel.resize`，同时继续裁掉相同区域中的客户端阴影。
 
 开发测试可用环境变量启用，不修改用户设置：
 
