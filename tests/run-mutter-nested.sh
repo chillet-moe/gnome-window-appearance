@@ -74,4 +74,5 @@ export MUTTER_DEBUG_EXPERIMENTAL_FEATURES=window-appearance
 # register their boxed GI types a second time.
 export LD_LIBRARY_PATH="$library_dir"
 
-dbus-run-session -- "$repo_dir/tests/integration/mutter-native-session.sh"
+"$repo_dir/tests/lib/run-isolated-session.sh" \
+    dbus-run-session -- "$repo_dir/tests/integration/mutter-native-session.sh"

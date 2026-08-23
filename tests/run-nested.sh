@@ -28,4 +28,5 @@ export GTK_A11Y=none
 export TEST_WAYLAND_DISPLAY="$wayland_display"
 export TEST_PROBE="$build_dir/bin/window-probe"
 export TEST_ARTIFACT_DIR="$repo_dir/tests/artifacts"
-dbus-run-session -- "$repo_dir/tests/integration/nested-session.sh"
+"$repo_dir/tests/lib/run-isolated-session.sh" \
+    dbus-run-session -- "$repo_dir/tests/integration/nested-session.sh"
