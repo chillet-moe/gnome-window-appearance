@@ -36,6 +36,11 @@ Fedora spec 或构建环境修改属于 `packaging/fedora/`，不应混入功能
      调用期间生效的 framebuffer clip，避免裁切同时限制 actor picking。
    - 保留客户端在 `frameRect` 外声明的输入区域，使 CSD 透明边框仍能发起
      `xdg_toplevel.resize`，同时继续裁掉相同区域中的客户端阴影。
+5. `0005-compositor-stabilize-wayland-appearance-sync.patch`
+   - 外观状态只在 compositor `before_paint` 和既有 geometry 生命周期同步，
+     不再从 actor `paint` / `get_paint_volume` 中修改 pipeline 或排队下一帧。
+   - 对 configure 期间短暂不一致的 frame/buffer geometry 和尚未 allocation 的
+     surface 采用无裁切降级，避免窗口正文被完整裁成透明并持续重绘动画末帧。
 
 开发测试可用环境变量启用，不修改用户设置：
 

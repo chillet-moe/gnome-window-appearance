@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: GNOME Window Appearance <gnome-window-appearance@chillet.moe>
+Date: Tue, 25 Aug 2026 00:00:00 +0800
+Subject: [PATCH] compositor: Stabilize Wayland appearance synchronization
+
+Do not queue another redraw while synchronizing private paint state from a
+paint-volume query or paint callback. In particular, a transient geometry
+change used to invalidate the same frame that was currently being prepared,
+which could leave Shell window animations repainting their final frame.
+
+Synchronize the appearance once from the compositor before-paint hook and
+from the existing geometry lifecycle instead of mutating it again while the
+actor is painting or reporting its volume. Reject transient frame/buffer
+geometry pairs that cannot describe an in-buffer window frame, and leave an
+unallocated surface unrounded until its allocation becomes valid. Both
+fallbacks prefer one undecorated frame over clipping the complete client
+content while configure commits are being reconciled.
+
+Target: Mutter 50.4
+Depends-on: 0004-compositor-preserve-wayland-surface-input.patch
+Tested-by: scripts/test-mutter-patches.sh
+Tested-by: tests/run-mutter-nested.sh
+---
+ src/compositor/meta-window-actor-wayland.c | 27 +++++++++++++++++-----
+ 1 file changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/src/compositor/meta-window-actor-wayland.c b/src/compositor/meta-window-actor-wayland.c
+--- a/src/compositor/meta-window-actor-wayland.c
++++ b/src/compositor/meta-window-actor-wayland.c
+@@ -767,8 +767,6 @@ surface_container_set_appearance_clip (
+   MetaSurfaceContainerActorWayland *surface_container,
+   const graphene_rect_t            *clip)
+ {
+-  ClutterActor *actor = CLUTTER_ACTOR (surface_container);
+-
+   if ((!clip && !surface_container->has_appearance_clip) ||
+       (clip && surface_container->has_appearance_clip &&
+        graphene_rect_equal (&surface_container->appearance_clip, clip)))
+@@ -778,8 +776,6 @@ surface_container_set_appearance_clip (
+   surface_container->has_appearance_clip = clip != NULL;
+   if (clip)
+     surface_container->appearance_clip = *clip;
+-
+-  clutter_actor_queue_redraw (actor);
+ }
+ 
+ static void
+@@ -826,6 +822,17 @@ sync_surface_tree_clip (MetaWindowActorWayland *self)
+   meta_window_get_buffer_rect (window, &buffer_rect);
+   geometry_scale = meta_window_actor_get_geometry_scale (window_actor);
+ 
++  if (geometry_scale <= 0 ||
++      frame_rect.width <= 0 || frame_rect.height <= 0 ||
++      frame_rect.x < buffer_rect.x ||
++      frame_rect.y < buffer_rect.y ||
++      frame_rect.x + frame_rect.width > buffer_rect.x + buffer_rect.width ||
++      frame_rect.y + frame_rect.height > buffer_rect.y + buffer_rect.height)
++    {
++      disable_window_appearance (self);
++      return;
++    }
++
+   rounded_bounds = GRAPHENE_RECT_INIT (
+     (frame_rect.x - buffer_rect.x) / (float) geometry_scale,
+     (frame_rect.y - buffer_rect.y) / (float) geometry_scale,
+@@ -848,6 +855,12 @@ sync_surface_tree_clip (MetaWindowActorWayland *self)
+       MetaShapedTexture *texture =
+         meta_surface_actor_get_texture (META_SURFACE_ACTOR (child));
+ 
++      if (!clutter_actor_has_allocation (child))
++        {
++          meta_shaped_texture_set_rounded_clip (texture, NULL, 0.0f);
++          continue;
++        }
++
+       clutter_actor_get_allocation_box (child, &child_box);
+       child_bounds.origin.x -= child_box.x1;
+       child_bounds.origin.y -= child_box.y1;
+@@ -895,7 +908,6 @@ meta_window_actor_wayland_paint (ClutterActor        *actor,
+   gboolean appears_focused;
+   MetaShadow *shadow;
+ 
+-  sync_surface_tree_clip (self);
+   appears_focused = meta_window_appears_focused (window);
+   shadow = ensure_window_shadow (self, appears_focused);
+ 
+@@ -941,7 +953,6 @@ meta_window_actor_wayland_get_paint_volume (ClutterActor       *actor,
+   ClutterActor *child;
+   ClutterActorIter iter;
+ 
+-  sync_surface_tree_clip (self);
+   appears_focused = meta_window_appears_focused (window);
+   shadow = ensure_window_shadow (self, appears_focused);
+   if (shadow)
+-- 
+2.55.0

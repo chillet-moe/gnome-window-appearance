@@ -1,5 +1,24 @@
 # Mutter 补丁测试记录
 
+## 2026-08-25：透明正文与动画末帧持续重绘修复
+
+真实会话偶发出现只剩 compositor 阴影、客户端正文完全透明，并持续呈现类似
+最大化动画末帧的重绘。代码检查发现外观同步同时运行在 compositor
+`before_paint`、actor `paint` 和 `get_paint_volume` 路径中；其中 clip 更新还会在
+当前帧准备期间再次 `queue_redraw()`。窗口 configure 过渡期间若 frame/buffer
+geometry 或 surface allocation 尚未同步，这条路径既可能生成裁掉完整正文的
+边界，也会为下一帧继续排队。
+
+第五个补丁将同步限制到 `before_paint` 和既有 geometry 生命周期，移除绘制与
+paint-volume 查询中的状态修改及递归 redraw。对于 frame 不在 buffer 内、尺寸
+无效或 surface 尚未 allocation 的瞬时状态，单帧降级为不应用原生外观，待下一次
+有效同步恢复，优先保证客户端正文可见。
+
+验证结果：五个补丁从干净 `mutter-50.4-1.fc44.src.rpm` 依次应用并完整编译
+694 个目标；250% 无头嵌套 Shell 的普通、最大化、恢复、全屏、Overview clone
+和工作区切换回归全部通过，窗口中心正文、四角、subsurface、阴影与 input clip
+像素/状态检查均通过；9 项仓库单元测试通过。
+
 ## 2026-08-23：Wayland resize picking 修复
 
 确认原 surface-container `clutter_actor_set_clip()` 会同时进入 Clutter paint 与
