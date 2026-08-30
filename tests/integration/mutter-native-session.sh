@@ -337,5 +337,11 @@ if rg -q 'JS ERROR|segmentation fault|assertion.*failed' "$shell_log"; then
     exit 1
 fi
 
+if rg -Fq 'invalid or stale main surface allocation' "$shell_log"; then
+    printf 'Valid window transitions were mistaken for stale surface geometry.\n' >&2
+    rg -nF 'invalid or stale main surface allocation' "$shell_log" >&2
+    exit 1
+fi
+
 printf 'Patched Mutter %s%% nested test passed. Log: %s Screenshot: %s\n' \
     "$test_percent" "$shell_log" "$screenshot"

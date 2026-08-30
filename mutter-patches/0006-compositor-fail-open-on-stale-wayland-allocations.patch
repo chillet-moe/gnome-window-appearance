@@ -1,0 +1,145 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: GNOME Window Appearance <gnome-window-appearance@chillet.moe>
+Date: Sun, 30 Aug 2026 00:00:00 +0800
+Subject: [PATCH] compositor: Reject stale Wayland surface allocations
+
+An allocated Wayland surface can temporarily retain a stale actor box while a
+configure, scale, or window animation transition is being reconciled. Applying
+the frame-relative rounded shader to a main surface whose actor box no longer
+intersects that frame makes every client pixel transparent, while the separate
+compositor shadow remains visible.
+
+Validate the main surface allocation before enabling any native appearance.
+Fail open for the complete window when it is invalid or disjoint, and emit one
+diagnostic per invalid episode with the relevant frame, buffer, and allocation
+geometry. Validate every subsurface as well, but only omit its rounded shader;
+the surface-container paint clip still prevents an out-of-frame subsurface from
+leaking client decoration.
+
+Target: Mutter 50.4
+Depends-on: 0005-compositor-stabilize-wayland-appearance-sync.patch
+Tested-by: scripts/test-mutter-patches.sh
+Tested-by: tests/run-mutter-nested.sh
+---
+ src/compositor/meta-window-actor-wayland.c | 70 +++++++++++++++++++++++
+ 1 file changed, 70 insertions(+)
+
+diff --git a/src/compositor/meta-window-actor-wayland.c b/src/compositor/meta-window-actor-wayland.c
+--- a/src/compositor/meta-window-actor-wayland.c
++++ b/src/compositor/meta-window-actor-wayland.c
+@@ -67,6 +67,7 @@ struct _MetaWindowActorWayland
+   MtkRegion *rounded_frame_region;
+   MtkRectangle frame_bounds;
+   gboolean needs_sync;
++  gboolean warned_about_invalid_surface_allocation;
+ };
+ 
+ static void cullable_iface_init (MetaCullableInterface *iface);
+@@ -804,15 +805,36 @@ disable_window_appearance (MetaWindowActorWayland *self)
+     }
+ }
+ 
++static gboolean
++actor_box_is_valid (const ClutterActorBox *box)
++{
++  return isfinite (box->x1) && isfinite (box->y1) &&
++         isfinite (box->x2) && isfinite (box->y2) &&
++         box->x2 > box->x1 && box->y2 > box->y1;
++}
++
++static gboolean
++actor_box_intersects_rect (const ClutterActorBox *box,
++                           const graphene_rect_t *rect)
++{
++  return box->x1 < rect->origin.x + rect->size.width &&
++         box->x2 > rect->origin.x &&
++         box->y1 < rect->origin.y + rect->size.height &&
++         box->y2 > rect->origin.y;
++}
++
+ static void
+ sync_surface_tree_clip (MetaWindowActorWayland *self)
+ {
+   MetaWindowActor *window_actor = META_WINDOW_ACTOR (self);
+   MetaWindow *window = meta_window_actor_get_meta_window (window_actor);
+   ClutterActor *surface_container = CLUTTER_ACTOR (self->surface_container);
++  MetaSurfaceActor *main_surface;
++  ClutterActor *main_surface_actor;
+   MtkRectangle frame_rect;
+   MtkRectangle buffer_rect;
+   graphene_rect_t rounded_bounds;
++  ClutterActorBox main_surface_box;
+   ClutterActor *child;
+   ClutterActorIter iter;
+   int geometry_scale;
+@@ -817,6 +839,7 @@ sync_surface_tree_clip (MetaWindowActorWayland *self)
+ 
+   if (!should_clip_surface_tree (window))
+     {
++      self->warned_about_invalid_surface_allocation = FALSE;
+       disable_window_appearance (self);
+       return;
+     }
+@@ -843,6 +866,46 @@ sync_surface_tree_clip (MetaWindowActorWayland *self)
+     (frame_rect.y - buffer_rect.y) / (float) geometry_scale,
+     frame_rect.width / (float) geometry_scale,
+     frame_rect.height / (float) geometry_scale);
++
++  main_surface = meta_window_actor_get_surface (window_actor);
++  main_surface_actor = main_surface ? CLUTTER_ACTOR (main_surface) : NULL;
++  if (!main_surface ||
++      clutter_actor_get_parent (main_surface_actor) != surface_container ||
++      !clutter_actor_has_allocation (main_surface_actor))
++    {
++      disable_window_appearance (self);
++      return;
++    }
++
++  clutter_actor_get_allocation_box (main_surface_actor, &main_surface_box);
++  if (!actor_box_is_valid (&main_surface_box) ||
++      !actor_box_intersects_rect (&main_surface_box, &rounded_bounds))
++    {
++      if (!self->warned_about_invalid_surface_allocation)
++        {
++          g_warning ("Disabling window appearance for %s: invalid or stale "
++                     "main surface allocation [%.3f, %.3f, %.3f, %.3f]; "
++                     "frame clip [%.3f, %.3f, %.3f, %.3f], "
++                     "frame (%d, %d, %d, %d), buffer (%d, %d, %d, %d), "
++                     "geometry scale %d",
++                     meta_window_get_description (window),
++                     main_surface_box.x1, main_surface_box.y1,
++                     main_surface_box.x2, main_surface_box.y2,
++                     rounded_bounds.origin.x, rounded_bounds.origin.y,
++                     rounded_bounds.size.width, rounded_bounds.size.height,
++                     frame_rect.x, frame_rect.y,
++                     frame_rect.width, frame_rect.height,
++                     buffer_rect.x, buffer_rect.y,
++                     buffer_rect.width, buffer_rect.height,
++                     geometry_scale);
++          self->warned_about_invalid_surface_allocation = TRUE;
++        }
++
++      disable_window_appearance (self);
++      return;
++    }
++
++  self->warned_about_invalid_surface_allocation = FALSE;
+   surface_container_set_appearance_clip (self->surface_container,
+                                          &rounded_bounds);
+   sync_shadow_geometry (
+@@ -867,6 +930,13 @@ sync_surface_tree_clip (MetaWindowActorWayland *self)
+         }
+ 
+       clutter_actor_get_allocation_box (child, &child_box);
++      if (!actor_box_is_valid (&child_box) ||
++          !actor_box_intersects_rect (&child_box, &rounded_bounds))
++        {
++          meta_shaped_texture_set_rounded_clip (texture, NULL, 0.0f);
++          continue;
++        }
++
+       child_bounds.origin.x -= child_box.x1;
+       child_bounds.origin.y -= child_box.y1;
+ 
+-- 
+2.55.0

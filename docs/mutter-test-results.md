@@ -1,5 +1,31 @@
 # Mutter 补丁测试记录
 
+## 2026-08-30：Chrome stale surface allocation 防护
+
+安装并确认真实会话运行 `mutter-50.4-1.gwa3.fc44` 后，Chrome 再次出现只剩
+compositor 阴影、正文透明并持续播放动画末帧的现象。三个 profile 共用同一组
+browser/GPU 进程，出问题的 profile 窗口关闭后无法再检查现场 actor；journal
+没有 GPU/DRM reset，且窗口外观原型扩展未安装，排除了旧包、重复外观实现和明显
+GPU reset。
+
+代码复查发现第五个补丁只处理了 `clutter_actor_has_allocation() == false`，但
+allocation 已标记存在时仍会无条件换算 child-local 圆角边界。如果 configure、
+fractional scale 或窗口动画过渡中保留了无效或与 frame 完全不相交的旧 actor
+box，圆角 shader 会把主 surface 的全部 fragment alpha 清零；独立绘制的阴影
+不受影响，因此与现场现象一致。
+
+第六个补丁在应用外观前验证主 surface allocation 的有限性、正尺寸和 frame
+相交关系。失败时移除整窗矩形裁切、圆角与阴影，下一次有效同步自动恢复；异常
+期间只写入一次包含窗口、allocation、frame、buffer 和 geometry scale 的 warning。
+其他 subsurface 几何异常只关闭其 shader，避免局部瞬时状态拖累整个窗口。
+
+验证结果：六个补丁从干净 `mutter-50.4-1.fc44.src.rpm` 顺序应用，目标
+`libmutter-18.so.0.0.0` 编译无警告；250% 无头嵌套 Shell 的普通、最大化、
+恢复、全屏、Overview clone 和工作区切换回归通过，正常状态过渡没有触发 stale
+allocation 诊断；9 项仓库单元测试通过。由于真实问题发生后窗口已关闭，本次根因
+仍以代码路径和现象吻合为依据；安装后若保护路径命中，可由 journal 中
+`invalid or stale main surface allocation` 直接确认。
+
 ## 2026-08-25：透明正文与动画末帧持续重绘修复
 
 真实会话偶发出现只剩 compositor 阴影、客户端正文完全透明，并持续呈现类似

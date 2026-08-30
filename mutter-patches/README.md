@@ -41,6 +41,13 @@ Fedora spec 或构建环境修改属于 `packaging/fedora/`，不应混入功能
      不再从 actor `paint` / `get_paint_volume` 中修改 pipeline 或排队下一帧。
    - 对 configure 期间短暂不一致的 frame/buffer geometry 和尚未 allocation 的
      surface 采用无裁切降级，避免窗口正文被完整裁成透明并持续重绘动画末帧。
+6. `0006-compositor-fail-open-on-stale-wayland-allocations.patch`
+   - 在启用矩形裁切和圆角 shader 前验证 Wayland 主 surface 的 allocation
+     有限、尺寸为正，并与 frame clip 相交；异常时整窗 fail-open，优先保留正文。
+   - 对无效或不相交的 subsurface allocation 仅跳过对应圆角 shader，仍由
+     surface-container 的 paint-only clip 限制 frame 外绘制。
+   - 同一段异常期间只记录一次窗口、allocation、frame、buffer 和 scale，便于
+     从 Shell journal 确认 Chrome configure/动画过渡是否命中了保护路径。
 
 开发测试可用环境变量启用，不修改用户设置：
 
